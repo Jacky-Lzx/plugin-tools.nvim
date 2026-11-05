@@ -97,17 +97,16 @@ function M.write_json(path, value)
   end
 end
 
--- Maps merge recursively; sequences replace, including an explicit empty table.
-function M.merge(base, extra)
-  local out = vim.deepcopy(base or {})
-  for key, value in pairs(extra or {}) do
-    if type(value) == "table" and next(value) and not vim.islist(value) and type(out[key]) == "table" then
-      out[key] = M.merge(out[key], value)
+-- The graph owns base exclusively. Copy incoming values once; maps merge in
+-- place while lists and explicit empty tables replace the previous key.
+function M.merge_into(base, extra)
+  for key, value in pairs(extra) do
+    if type(value) == "table" and next(value) and not vim.islist(value) and type(base[key]) == "table" then
+      M.merge_into(base[key], value)
     else
-      out[key] = vim.deepcopy(value)
+      base[key] = vim.deepcopy(value)
     end
   end
-  return out
 end
 
 return M

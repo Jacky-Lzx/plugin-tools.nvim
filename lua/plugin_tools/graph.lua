@@ -67,7 +67,9 @@ function M.resolve(specs, opts)
       end
     end
     U.check(spec.opts == nil or type(spec.opts) == "table", id .. ": opts must be a table")
-    n.opts = U.merge(n.opts, spec.opts)
+    if spec.opts then
+      U.merge_into(n.opts, spec.opts)
+    end
     for _, dep in ipairs(list(spec.dependencies or {}, id .. ".dependencies")) do
       local target, optional
       if type(dep) == "string" then

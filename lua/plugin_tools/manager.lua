@@ -21,11 +21,22 @@ function Manager:has(id)
   return state ~= nil and state.phase ~= "missing"
 end
 
+local context_options = setmetatable({}, { __mode = "k" })
+local context_meta = {
+  __index = function(ctx, key)
+    if key == "opts" then
+      local options = vim.deepcopy(context_options[ctx])
+      context_options[ctx] = nil
+      rawset(ctx, key, options)
+      return options
+    end
+  end,
+}
+
 function Manager:_context(n)
-  return {
+  local ctx = {
     id = n.id,
     dir = n.dir,
-    opts = vim.deepcopy(n.opts),
     has = function(id)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
       return self:has(id)
@@ -39,6 +50,12 @@ function Manager:_context(n)
       return self:activate(id)
     end,
   }
+  if not next(n.opts) then
+    ctx.opts = {}
+    return ctx
+  end
+  context_options[ctx] = n.opts
+  return setmetatable(ctx, context_meta)
 end
 
 function Manager:start()

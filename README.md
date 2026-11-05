@@ -167,10 +167,11 @@ initialization cycles and recursive activation report the cycle path.
 `ctx` contains `id`, `dir`, a private `opts` copy, and `has(id)`, `activate(id)`,
 and `use(id)` closures. Those closures accept only dependencies declared by that
 node. `has()` inspects availability without loading modules. A context uses dot
-calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`). The `opts` field is materialized and cached on
-first access; a bootstrap that only installs entry points does not copy it.
-Bootstrap and configuration contexts receive independent copies. Graph option
-merges mutate only manager-owned tables, copying incoming values once; caller
+calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`).
+Nonempty `opts` are copied and cached on first access; a callback that only
+registers entry points does not copy the options tree. Contexts receive independent
+copies. Graph option merges mutate only manager-owned tables, copying incoming
+values once; caller
 specifications and other nodes remain isolated.
 
 ## Lua API and commands
