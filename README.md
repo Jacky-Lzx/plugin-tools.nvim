@@ -202,6 +202,19 @@ Async package methods return a task with `done`, `result`, `error`, and
 `task:wait(timeout_ms)`. `wait()` pumps the event loop; a wait timeout does not
 cancel or unlock the ongoing operation. Inspect the task or wait again.
 
+`on_progress(event)` receives isolated phase events while an operation runs:
+`checking`, `cloning`, `checkout`, `submodules`, `building`, `helptags`, `staged`,
+and `publishing`, followed by completion or rollback. Events include `id`,
+`total`, `completed`, and elapsed time. `task:subscribe(callback)` adds an observer
+and returns an unsubscribe function; observer errors never abort package work.
+`task:snapshot()` returns copied per-package progress, including `before_commit`,
+`after_commit`, build requirements and failure details. Counts advance only after
+the transaction commits. `task.report` is available even on failure, with a
+structured `{ id, phase, message }` error; `wait()` keeps returning `nil, error`
+on failure. Successful results retain the `packages` ID list and add `details`.
+`manager.last_operation` retains the latest task, whose `events` contain the last
+500 phase/process records (each stdout/stderr record is limited to 16 KiB).
+
 | Method / command | Behavior |
 | --- | --- |
 | `install()` / `:PluginTools install [ids...]` | Install missing packages at locked revision, or declared version; verify existing versions against the lock |
@@ -212,7 +225,7 @@ cancel or unlock the ongoing operation. Inspect the task or wait again.
 | `clean({dry_run=false})` / `:PluginTools clean --apply` | Remove those packages and their lock entries |
 | `:PluginTools status` / `:PluginTools explain id` | Inspect state and inclusion reasons |
 
-Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000,
+Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000, on_progress = function(event) ... end,
 on_complete = function(result, err) ... end }`. IDs select package owners, so
 selecting a component selects its shared checkout. Clean uses the whole graph and
 does not accept IDs. Manager options `concurrency` and `git_timeout` supply the

@@ -76,6 +76,12 @@ install, update, restore, freeze and clean return tasks. wait pumps the event
 loop; its timeout does not cancel the task. An on_complete(result, err) option
 receives completion without waiting.
 
+on_progress(event) reports package phases and committed counts. task:subscribe(fn)
+returns an unsubscribe function; task:snapshot() copies current progress.
+Successful results include details with before_commit/after_commit and phases.
+task.report also retains structured failure information; task.events keeps the
+last 500 phase/process records. manager.last_operation retains the latest task.
+
 Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
 strict=true, commands=true, concurrency=4, git_timeout=120000, profile=false.
 Operation options: ids, concurrency, timeout, on_complete; clean accepts dry_run

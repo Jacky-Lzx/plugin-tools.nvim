@@ -56,7 +56,6 @@ end
 -- filesystem publication happens on the main thread after every worker succeeds.
 function M.run(manager, action, opts)
   U.check(not manager.operation, "an operation is already running on this manager")
-  local task = { done = false, action = action }
   local root, staging, swaps, locked = manager.graph.root, {}, {}, false
   local lockdir = root .. "/.operation-lock"
   local timeout = opts.timeout or manager.options.git_timeout or 120000
@@ -66,14 +65,18 @@ function M.run(manager, action, opts)
     "concurrency must be a positive integer"
   )
   U.check(type(timeout) == "number" and timeout > 0, "timeout must be a positive number")
+  local task = require("plugin_tools.task").new(action, opts)
+  manager.last_operation = task
   manager.operation = task
   local co
+  local worker_ids = {}
 
   local function resume(thread, ...)
     local ok, err = coroutine.resume(thread, ...)
     if not ok then
       -- Expected errors are caught by the transaction's xpcall.
-      task.done, task.error, manager.operation = true, tostring(err), nil
+      task:finish(nil, tostring(err))
+      manager.operation = nil
     end
   end
 
@@ -92,6 +95,7 @@ function M.run(manager, action, opts)
     )
     U.check(ok, "cannot start " .. tostring(argv[1]) .. ": " .. tostring(err))
     local result = coroutine.yield()
+    task:log(worker_ids[thread], argv, result)
     local output = result.stderr and result.stderr ~= "" and result.stderr or result.stdout or ""
     U.check(
       result.code == 0,
@@ -113,6 +117,7 @@ function M.run(manager, action, opts)
   end
 
   local function stage(package, mode, lock)
+    task:emit("checking", package.id)
     local exists, marker = owned(package)
     local previous_commit
     if exists then
@@ -122,6 +127,7 @@ function M.run(manager, action, opts)
       )
       previous_commit = git(package.dir, "rev-parse", "HEAD")
     end
+    task:emit("checking", package.id, { before_commit = previous_commit })
     local entry = lock.plugins[package.id]
     if mode == "update" and exists then
       U.check(
@@ -135,6 +141,7 @@ function M.run(manager, action, opts)
         not entry or (entry.source == package.source and entry.commit == commit),
         package.id .. ": installed version differs from lockfile; use restore() or freeze()"
       )
+      task:emit("staged", package.id, { after_commit = commit, unchanged = true })
       return { package = package, commit = commit, unchanged = true }
     end
     if entry and mode ~= "update" then
@@ -150,6 +157,7 @@ function M.run(manager, action, opts)
       vim.list_extend(clone, { "--reference-if-able", package.dir, "--dissociate" })
     end
     vim.list_extend(clone, { "--", package.source, checkout })
+    task:emit("cloning", package.id)
     process(clone)
     local ref = (mode ~= "update" and entry and entry.commit) or package.version or "HEAD"
     U.check(not ref:match("^-"), package.id .. ": version cannot begin with '-' ")
@@ -167,13 +175,16 @@ function M.run(manager, action, opts)
       end
       revision = git(checkout, "rev-parse", "--verify", ref .. "^{commit}")
     end
+    task:emit("checkout", package.id, { after_commit = revision })
     git(checkout, "checkout", "--quiet", "--detach", revision)
+    task:emit("submodules", package.id)
     git(checkout, "submodule", "update", "--init", "--recursive")
     U.write_json(
       checkout .. "/.git/plugin-tools-owner.json",
       { id = package.id, source = package.source, commit = revision }
     )
     if package.build then
+      task:emit("building", package.id)
       if type(package.build) == "function" then
         package.build({ id = package.id, dir = checkout })
       else
@@ -181,6 +192,7 @@ function M.run(manager, action, opts)
       end
     end
     if U.directory(checkout .. "/doc") then
+      task:emit("helptags", package.id)
       vim.api.nvim_cmd({ cmd = "helptags", args = { checkout .. "/doc" } }, {})
       -- Generated help tags are manager-owned build artifacts.
       local exclude = assert(io.open(checkout .. "/.git/info/exclude", "a"))
@@ -193,6 +205,7 @@ function M.run(manager, action, opts)
       git(checkout, "status", "--porcelain", "--untracked-files=normal") == "",
       package.id .. ": build left a dirty checkout; ignore generated outputs"
     )
+    task:emit("staged", package.id)
     return {
       package = package,
       commit = revision,
@@ -214,10 +227,12 @@ function M.run(manager, action, opts)
         while not failed and next_index <= #packages do
           local index = next_index
           next_index = index + 1
+          worker_ids[coroutine.running()] = packages[index].id
           local ok, result = xpcall(function()
             return stage(packages[index], mode, lock)
           end, debug.traceback)
           if not ok then
+            task:fail(packages[index].id, result)
             failed = result
           else
             results[index] = result
@@ -238,6 +253,7 @@ function M.run(manager, action, opts)
   end
 
   local function execute()
+    task:emit("locking")
     U.check(
       not uv.fs_lstat(root) or uv.fs_lstat(root).type == "directory",
       "refusing symlink/non-directory root " .. root
@@ -248,6 +264,7 @@ function M.run(manager, action, opts)
     locked = true
     U.write_json(lockdir .. "/owner.json", { pid = uv.os_getpid(), action = action })
     local lock, packages = lock_data(manager), selected(manager, opts)
+    task:select(action == "clean" and {} or packages)
     if action == "clean" then
       U.check(not opts.ids, "clean operates on the complete graph; ids are not supported")
       local unused = {}
@@ -280,8 +297,11 @@ function M.run(manager, action, opts)
       table.sort(unused, function(a, b)
         return a.id < b.id
       end)
+      task:select(unused)
       if opts.dry_run == false then
         for _, p in ipairs(unused) do
+          worker_ids[coroutine.running()] = p.id
+          task:emit("removing", p.id)
           local temp = assert(uv.fs_mkdtemp(root .. "/.stage-clean-XXXXXX"))
           staging[#staging + 1] = temp
           local backup = temp .. "/previous"
@@ -290,6 +310,9 @@ function M.run(manager, action, opts)
           lock.plugins[p.id] = nil
         end
         U.write_json(manager.lockfile, lock)
+      end
+      for _, p in ipairs(unused) do
+        task:complete(p.id, opts.dry_run == false and "removed" or "previewed")
       end
       return {
         action = action,
@@ -301,12 +324,15 @@ function M.run(manager, action, opts)
     end
     if action == "freeze" then
       for _, p in ipairs(packages) do
+        worker_ids[coroutine.running()] = p.id
+        task:emit("checking", p.id, { before_commit = lock.plugins[p.id] and lock.plugins[p.id].commit })
         U.check(owned(p), "missing checkout " .. p.dir)
         U.check(
           git(p.dir, "status", "--porcelain", "--untracked-files=normal") == "",
           "local modifications in " .. p.dir
         )
         lock.plugins[p.id] = { source = p.source, commit = git(p.dir, "rev-parse", "HEAD") }
+        task:emit("staged", p.id, { after_commit = lock.plugins[p.id].commit })
       end
     else
       local results = stage_all(packages, action, lock)
@@ -314,7 +340,9 @@ function M.run(manager, action, opts)
       -- until the lockfile's atomic replacement succeeds.
       for _, result in ipairs(results) do
         local p = result.package
+        worker_ids[coroutine.running()] = p.id
         if not result.unchanged then
+          task:emit("publishing", p.id)
           local swap = { dir = p.dir }
           if result.existed then
             -- Recheck after asynchronous work before moving an existing tree.
@@ -340,6 +368,11 @@ function M.run(manager, action, opts)
       end
     end
     U.write_json(manager.lockfile, lock)
+    for _, p in ipairs(packages) do
+      local item = task.items[p.id]
+      local phases = { install = "installed", update = "updated", restore = "restored", freeze = "frozen" }
+      task:complete(p.id, item.unchanged and "unchanged" or phases[action])
+    end
     return {
       action = action,
       packages = vim.tbl_map(function(p)
@@ -353,7 +386,11 @@ function M.run(manager, action, opts)
   co = coroutine.create(function()
     local ok, result = xpcall(execute, debug.traceback)
     if not ok then
+      if not task.failure then
+        task:fail(worker_ids[coroutine.running()], result)
+      end
       local rollback_errors = {}
+      task:emit("rolling_back")
       for i = #swaps, 1, -1 do
         local swap = swaps[i]
         if swap.published and uv.fs_lstat(swap.dir) then
@@ -374,13 +411,20 @@ function M.run(manager, action, opts)
       else
         result = result .. "\nROLLBACK: " .. table.concat(rollback_errors, "; ")
       end
+      for _, id in ipairs(task.order) do
+        local item = task.items[id]
+        if item.phase ~= "failed" then
+          task:emit(#rollback_errors > 0 and "recovery_required" or "rolled_back", id)
+        end
+      end
     else
       clean_staging()
     end
     if locked then
       vim.fn.delete(lockdir, "rf")
     end
-    task.done, task.result, task.error, manager.operation = true, ok and result or nil, not ok and result or nil, nil
+    task:finish(ok and result or nil, not ok and result or nil)
+    manager.operation = nil
     if opts.on_complete then
       local callback_ok, callback_err = pcall(opts.on_complete, task.result, task.error)
       if not callback_ok then
@@ -389,15 +433,6 @@ function M.run(manager, action, opts)
     end
   end)
 
-  function task:wait(milliseconds)
-    local finished = self.done or vim.wait(milliseconds or 300000, function()
-      return self.done
-    end, 10)
-    if not finished then
-      return nil, "operation still running (wait timed out)"
-    end
-    return self.result, self.error
-  end
   vim.schedule(function()
     resume(co)
   end)
