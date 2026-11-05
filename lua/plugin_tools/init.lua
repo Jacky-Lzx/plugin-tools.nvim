@@ -37,6 +37,8 @@ for _, method in ipairs({
   "restore",
   "freeze",
   "clean",
+  "plan",
+  "recover",
 }) do
   M[method] = function(...)
     assert(current, "plugin-tools: call setup() first, or use new()")

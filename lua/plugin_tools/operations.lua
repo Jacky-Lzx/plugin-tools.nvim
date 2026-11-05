@@ -56,6 +56,11 @@ end
 -- filesystem publication happens on the main thread after every worker succeeds.
 function M.run(manager, action, opts)
   U.check(not manager.operation, "an operation is already running on this manager")
+  local reviewed = opts.plan and manager.reviewed_plan
+  if opts.plan then
+    U.check(action == "update" and not opts.ids, "apply a plan with update({plan=report}) and no ids")
+    U.check(reviewed and reviewed.report == opts.plan, "plan must be the latest successful preview from this manager")
+  end
   local root, staging, swaps, locked = manager.graph.root, {}, {}, false
   local lockdir = root .. "/.operation-lock"
   local timeout = opts.timeout or manager.options.git_timeout or 120000
@@ -70,6 +75,7 @@ function M.run(manager, action, opts)
   manager.operation = task
   local co
   local worker_ids = {}
+  local transaction, keep_lock, review
 
   local function resume(thread, ...)
     local ok, err = coroutine.resume(thread, ...)
@@ -94,8 +100,26 @@ function M.run(manager, action, opts)
       end
     )
     U.check(ok, "cannot start " .. tostring(argv[1]) .. ": " .. tostring(err))
+    local handle, process_key, journal_error = err
+    if transaction then
+      process_key = tostring(handle.pid)
+      transaction.data.processes[process_key] = { pid = handle.pid, command = argv[1] }
+      local saved, save_err = pcall(transaction.save, transaction)
+      if not saved then
+        journal_error = tostring(save_err)
+        handle:kill(15)
+      end
+    end
     local result = coroutine.yield()
+    if process_key then
+      transaction.data.processes[process_key] = nil
+      local saved, save_err = pcall(transaction.save, transaction)
+      if not saved then
+        journal_error = journal_error or tostring(save_err)
+      end
+    end
     task:log(worker_ids[thread], argv, result)
+    U.check(not journal_error, "cannot journal process: " .. tostring(journal_error))
     local output = result.stderr and result.stderr ~= "" and result.stderr or result.stdout or ""
     U.check(
       result.code == 0,
@@ -111,9 +135,19 @@ function M.run(manager, action, opts)
   end
 
   local function clean_staging()
-    for _, path in ipairs(staging) do
-      vim.fn.delete(path, "rf")
+    local errors = {}
+    if transaction then
+      local saved, err = pcall(transaction.cleanup_start, transaction)
+      if not saved then
+        return { tostring(err) }
+      end
     end
+    for _, path in ipairs(staging) do
+      if uv.fs_lstat(path) and vim.fn.delete(path, "rf") ~= 0 then
+        errors[#errors + 1] = "cannot clean " .. path
+      end
+    end
+    return errors
   end
 
   local function stage(package, mode, lock)
@@ -128,8 +162,19 @@ function M.run(manager, action, opts)
       previous_commit = git(package.dir, "rev-parse", "HEAD")
     end
     task:emit("checking", package.id, { before_commit = previous_commit })
+    local preview = reviewed and reviewed.entries[package.id]
+    if preview then
+      U.check(
+        preview.source == package.source
+          and preview.version == package.version
+          and vim.deep_equal(preview.build, package.build),
+        package.id .. ": configuration changed since preview; create a new plan"
+      )
+      U.check(preview.before_commit == previous_commit, package.id .. ": checkout changed since preview")
+    end
     local entry = lock.plugins[package.id]
-    if mode == "update" and exists then
+    local updating = mode == "update" or mode == "plan"
+    if updating and exists then
       U.check(
         (not entry or entry.source == package.source) and (entry and entry.commit or marker.commit) == previous_commit,
         package.id .. ": checkout differs from lockfile; use freeze() or restore() first"
@@ -144,13 +189,14 @@ function M.run(manager, action, opts)
       task:emit("staged", package.id, { after_commit = commit, unchanged = true })
       return { package = package, commit = commit, unchanged = true }
     end
-    if entry and mode ~= "update" then
+    if entry and not updating then
       U.check(entry.source == package.source, package.id .. ": lockfile source differs from spec")
     end
     U.check(mode ~= "restore" or entry, package.id .. ": no locked revision to restore")
     local temporary, err = uv.fs_mkdtemp(root .. "/.stage-" .. package.id .. "-XXXXXX")
     U.check(temporary, "cannot stage " .. package.id .. ": " .. tostring(err))
     staging[#staging + 1] = temporary
+    transaction:stage(temporary)
     local checkout = temporary .. "/checkout"
     local clone = { "git", "clone", "--quiet", "--filter=blob:none", "--no-checkout" }
     if exists then
@@ -159,7 +205,10 @@ function M.run(manager, action, opts)
     vim.list_extend(clone, { "--", package.source, checkout })
     task:emit("cloning", package.id)
     process(clone)
-    local ref = (mode ~= "update" and entry and entry.commit) or package.version or "HEAD"
+    local ref = (preview and preview.after_commit)
+      or (not updating and entry and entry.commit)
+      or package.version
+      or "HEAD"
     U.check(not ref:match("^-"), package.id .. ": version cannot begin with '-' ")
     -- Git clone stores remote branches under refs/remotes/origin; prefer an
     -- explicit branch/tag and only then accept a commit-ish.
@@ -175,13 +224,16 @@ function M.run(manager, action, opts)
       end
       revision = git(checkout, "rev-parse", "--verify", ref .. "^{commit}")
     end
-    task:emit("checkout", package.id, { after_commit = revision })
+    task:emit(mode == "plan" and "resolved" or "checkout", package.id, { after_commit = revision })
+    if mode == "plan" then
+      return { package = package, commit = revision, previous_commit = previous_commit }
+    end
     git(checkout, "checkout", "--quiet", "--detach", revision)
     task:emit("submodules", package.id)
     git(checkout, "submodule", "update", "--init", "--recursive")
     U.write_json(
       checkout .. "/.git/plugin-tools-owner.json",
-      { id = package.id, source = package.source, commit = revision }
+      { id = package.id, source = package.source, commit = revision, transaction = transaction.data.id }
     )
     if package.build then
       task:emit("building", package.id)
@@ -259,12 +311,31 @@ function M.run(manager, action, opts)
       "refusing symlink/non-directory root " .. root
     )
     U.mkdir(root)
+    if action == "recover" then
+      U.check(not opts.ids, "recover does not accept ids")
+      return require("plugin_tools.transaction").recover(manager, opts, git, task)
+    end
     local acquired, err = uv.fs_mkdir(lockdir, 448)
     U.check(acquired, "operation lock unavailable at " .. lockdir .. ": " .. tostring(err))
     locked = true
     U.write_json(lockdir .. "/owner.json", { pid = uv.os_getpid(), action = action })
     local lock, packages = lock_data(manager), selected(manager, opts)
+    if reviewed then
+      packages = selected(manager, { ids = reviewed.ids })
+    end
+    transaction = require("plugin_tools.transaction").begin(manager, action, lock, staging, swaps)
     task:select(action == "clean" and {} or packages)
+    for _, p in ipairs(packages) do
+      local components = {}
+      for _, id in ipairs(manager.graph.order) do
+        if manager.graph.nodes[id].owner == p.id then
+          components[#components + 1] = id
+        end
+      end
+      if task.items[p.id] then
+        task.items[p.id].components = components
+      end
+    end
     if action == "clean" then
       U.check(not opts.ids, "clean operates on the complete graph; ids are not supported")
       local unused = {}
@@ -304,13 +375,24 @@ function M.run(manager, action, opts)
           task:emit("removing", p.id)
           local temp = assert(uv.fs_mkdtemp(root .. "/.stage-clean-XXXXXX"))
           staging[#staging + 1] = temp
+          transaction:stage(temp)
           local backup = temp .. "/previous"
+          swaps[#swaps + 1] = {
+            id = p.id,
+            source = p.source,
+            dir = p.dir,
+            backup = backup,
+            before_commit = git(p.dir, "rev-parse", "HEAD"),
+            clean = true,
+          }
+          transaction:phase("publishing")
           U.check(uv.fs_rename(p.dir, backup), "cannot remove " .. p.dir)
-          swaps[#swaps + 1] = { dir = p.dir, backup = backup }
           lock.plugins[p.id] = nil
         end
+        transaction:target(lock)
         U.write_json(manager.lockfile, lock)
       end
+      transaction:phase("committed")
       for _, p in ipairs(unused) do
         task:complete(p.id, opts.dry_run == false and "removed" or "previewed")
       end
@@ -336,6 +418,23 @@ function M.run(manager, action, opts)
       end
     else
       local results = stage_all(packages, action, lock)
+      if action == "plan" then
+        review = { ids = {}, entries = {} }
+        for _, result in ipairs(results) do
+          local p = result.package
+          review.ids[#review.ids + 1] = p.id
+          review.entries[p.id] = {
+            source = p.source,
+            version = p.version,
+            build = type(p.build) == "table" and vim.deepcopy(p.build) or p.build,
+            before_commit = result.previous_commit,
+            after_commit = result.commit,
+          }
+          task:complete(p.id, "planned")
+        end
+        transaction:phase("committed")
+        return { action = "plan", packages = vim.list_slice(review.ids), dry_run = true, restart_required = false }
+      end
       -- All builds succeeded. Publish complete directories, retaining backups
       -- until the lockfile's atomic replacement succeeds.
       for _, result in ipairs(results) do
@@ -343,7 +442,13 @@ function M.run(manager, action, opts)
         worker_ids[coroutine.running()] = p.id
         if not result.unchanged then
           task:emit("publishing", p.id)
-          local swap = { dir = p.dir }
+          local swap = {
+            id = p.id,
+            source = p.source,
+            dir = p.dir,
+            before_commit = result.previous_commit,
+            after_commit = result.commit,
+          }
           if result.existed then
             -- Recheck after asynchronous work before moving an existing tree.
             owned(p)
@@ -356,18 +461,24 @@ function M.run(manager, action, opts)
               p.id .. ": checkout changed during operation"
             )
             swap.backup = result.temporary .. "/previous"
+            swaps[#swaps + 1] = swap
+            transaction:phase("publishing")
             U.check(uv.fs_rename(p.dir, swap.backup), "cannot back up " .. p.dir)
           else
             U.check(not uv.fs_lstat(p.dir), "package directory appeared during operation: " .. p.dir)
+            swaps[#swaps + 1] = swap
+            transaction:phase("publishing")
           end
-          swaps[#swaps + 1] = swap
           U.check(uv.fs_rename(result.checkout, p.dir), "cannot publish " .. p.dir)
           swap.published = true
+          transaction:save()
         end
         lock.plugins[p.id] = { source = p.source, commit = result.commit }
       end
     end
+    transaction:target(lock)
     U.write_json(manager.lockfile, lock)
+    transaction:phase("committed")
     for _, p in ipairs(packages) do
       local item = task.items[p.id]
       local phases = { install = "installed", update = "updated", restore = "restored", freeze = "frozen" }
@@ -391,6 +502,12 @@ function M.run(manager, action, opts)
       end
       local rollback_errors = {}
       task:emit("rolling_back")
+      if transaction then
+        local saved, err = pcall(transaction.phase, transaction, "rolling_back")
+        if not saved then
+          rollback_errors[#rollback_errors + 1] = tostring(err)
+        end
+      end
       for i = #swaps, 1, -1 do
         local swap = swaps[i]
         if swap.published and uv.fs_lstat(swap.dir) then
@@ -399,16 +516,38 @@ function M.run(manager, action, opts)
             rollback_errors[#rollback_errors + 1] = "cannot remove " .. swap.dir
           end
         end
-        if swap.backup then
+        if swap.backup and uv.fs_lstat(swap.backup) then
           local restored, err = uv.fs_rename(swap.backup, swap.dir)
           if not restored then
             rollback_errors[#rollback_errors + 1] = "backup retained at " .. swap.backup .. ": " .. tostring(err)
           end
         end
       end
+      if transaction then
+        local restored, err = pcall(transaction.restore_lock, transaction)
+        if not restored then
+          rollback_errors[#rollback_errors + 1] = tostring(err)
+        end
+      end
       if #rollback_errors == 0 then
-        clean_staging()
-      else
+        if transaction then
+          local saved, err = pcall(transaction.phase, transaction, "rolled_back")
+          if not saved then
+            rollback_errors[#rollback_errors + 1] = tostring(err)
+          end
+        end
+        if #rollback_errors == 0 then
+          rollback_errors = clean_staging()
+        end
+      end
+      if #rollback_errors > 0 then
+        keep_lock = true
+        if transaction then
+          pcall(transaction.phase, transaction, "rollback_failed")
+        end
+        if transaction then
+          pcall(transaction.finished, transaction)
+        end
         result = result .. "\nROLLBACK: " .. table.concat(rollback_errors, "; ")
       end
       for _, id in ipairs(task.order) do
@@ -418,12 +557,33 @@ function M.run(manager, action, opts)
         end
       end
     else
-      clean_staging()
+      local errors = clean_staging()
+      if #errors > 0 then
+        keep_lock = true
+        result.recovery_required = true
+        result.cleanup_errors = errors
+        if transaction then
+          pcall(transaction.finished, transaction)
+        end
+      end
     end
-    if locked then
-      vim.fn.delete(lockdir, "rf")
+    if locked and not keep_lock then
+      if vim.fn.delete(lockdir, "rf") ~= 0 then
+        if ok then
+          result.recovery_required = true
+        end
+        if transaction then
+          pcall(transaction.finished, transaction)
+        end
+      end
     end
     task:finish(ok and result or nil, not ok and result or nil)
+    if ok and review then
+      review.report = task.result
+      manager.reviewed_plan, manager.last_plan = review, task.result
+    elseif ok and action == "update" then
+      manager.reviewed_plan, manager.last_plan = nil, nil
+    end
     manager.operation = nil
     if opts.on_complete then
       local callback_ok, callback_err = pcall(opts.on_complete, task.result, task.error)

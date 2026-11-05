@@ -38,6 +38,8 @@ return { setup = function(opts) _G.backend_opts = opts end, render = function() 
     },
   }):start()
   H.eq(package.loaded["plugin_tools.operations"], nil)
+  H.eq(package.loaded["plugin_tools.transaction"], nil)
+  H.eq(package.loaded["plugin_tools.task"], nil)
   H.eq(package.loaded["plugin_tools.ui"], nil)
   H.eq(package.loaded.cold_backend, nil)
   H.eq(manager:explain("b").state.phase, "mounted")

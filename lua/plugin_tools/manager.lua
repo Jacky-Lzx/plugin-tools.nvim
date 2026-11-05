@@ -236,7 +236,7 @@ function Manager:explain(id)
   }
 end
 
-for _, operation in ipairs({ "install", "update", "restore", "freeze", "clean" }) do
+for _, operation in ipairs({ "install", "update", "restore", "freeze", "clean", "plan", "recover" }) do
   Manager[operation] = function(self, opts)
     return require("plugin_tools.operations").run(self, operation, opts or {})
   end

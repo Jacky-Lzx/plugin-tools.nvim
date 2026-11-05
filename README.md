@@ -220,8 +220,9 @@ and `publishing`, followed by completion or rollback. Events include `id`,
 `total`, `completed`, and elapsed time. `task:subscribe(callback)` adds an observer
 and returns an unsubscribe function; observer errors never abort package work.
 `task:snapshot()` returns copied per-package progress, including `before_commit`,
-`after_commit`, build requirements and failure details. Counts advance only after
-the transaction commits. `task.report` is available even on failure, with a
+`after_commit`, build requirements and failure details. Counts advance after
+commit, or after a preview validates all selected packages. `task.report` is
+available even on failure, with a
 structured `{ id, phase, message }` error; `wait()` keeps returning `nil, error`
 on failure. Successful results retain the `packages` ID list and add `details`.
 `manager.last_operation` retains the latest task, whose `events` contain the last
@@ -231,12 +232,16 @@ on failure. Successful results retain the `packages` ID list and add `details`.
 | --- | --- |
 | `install()` / `:PluginTools install [ids...]` | Install missing packages at locked revision, or declared version; verify existing versions against the lock |
 | `update()` / `:PluginTools update [ids...]` | Update selected packages and lock revisions |
+| `plan()` / `:PluginTools plan [ids...]` | Preview update commits, affected components and builds without publishing |
+| `update({plan=report})` / `:PluginTools apply` | Apply the latest reviewed plan's exact commits |
 | `restore()` / `:PluginTools restore [ids...]` | Restore selected packages to exact locked revisions |
 | `freeze()` / `:PluginTools freeze [ids...]` | Record selected existing checkout revisions |
 | `clean()` / `:PluginTools clean` | Preview unreferenced owned packages |
 | `clean({dry_run=false})` / `:PluginTools clean --apply` | Remove those packages and their lock entries |
 | `:PluginTools status` / `:PluginTools explain id` | Inspect state and inclusion reasons |
 | `:PluginTools log` | View the last operation's phase and process log |
+| `recover()` / `:PluginTools recover` | Preview recovery of an interrupted transaction |
+| `recover({dry_run=false})` / `:PluginTools recover --apply` | Apply validated rollback or finish committed cleanup |
 
 Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000, on_progress = function(event) ... end,
 on_complete = function(result, err) ... end }`. IDs select package owners, so
@@ -253,10 +258,20 @@ directories, Space selects nodes, Enter expands their configuration/error detail
 and `l` switches between status and operation logs. `u`, `i`, `s`, and `f` update,
 install, restore, or freeze the selection (or the node under the cursor).
 Components select their shared package automatically. `c` previews cleanup and
-`C` applies cleanup to the complete graph. `r` refreshes; `q` closes the panel.
+`C` applies cleanup to the complete graph. `p` previews an update and `a` applies
+the reviewed commits. `R` previews recovery. `r` refreshes; `q` closes the panel.
 The panel subscribes to active tasks and releases its subscription when closed;
 it adds no startup timers or UI dependencies. Operations started through the Lua
 API outside the panel can be attached with `r`. Command completion includes IDs.
+
+Update previews clone Git objects into temporary staging to resolve target refs,
+but do not check out files, initialize submodules, generate tags, run builds,
+replace installed directories, or write the plugin lockfile. Details include
+old/new commits, affected components, and build requirements/argv. Apply accepts
+only the latest successful plan from the same manager instance, validates that
+the source/version/build and checkout still agree, and pins the reviewed commit
+even if an upstream branch advances. Public report edits do not change the
+private reviewed targets. Plans are session-local; re-plan after restarting.
 
 ## Update and cleanup guarantees
 
@@ -287,11 +302,25 @@ unknown directories and never follows a package-directory symlink. Shared
 packages remain selected while any enabled declaration still owns them.
 
 An exclusive `root/.operation-lock` prevents concurrent operations on the same
-root, including across processes. A process crash can leave that lock and staging
-backups behind. Inspect the recorded PID, stop the owning process, and recover
-needed backups before removing a stale lock. Transactions recover caught errors,
-not abrupt termination or power loss. Use one root/lockfile pair per configuration
-and do not externally edit checkouts during an operation.
+root, including across processes. Its atomically replaced `journal.json` records
+staging ownership, active child PIDs, publication intents before renames, backups,
+and the old/target lockfile. A process crash leaves those records for explicit
+recovery. `:PluginTools recover` previews actions; `--apply` rolls back unfinished
+publication or keeps an already committed version and removes backups. A target
+lockfile proves commit completion even if termination preceded the final journal
+marker. Caught rollback/cleanup failures retain their journal and backups.
+
+Recovery checks all paths and checkout states before changing any package. It
+refuses unfinished live owners, recorded live Git/build processes, dirty or moved
+checkouts, changed lockfiles, mismatched ownership, symlinks and unsafe journal
+paths. Unknown directories are preserved. Resolve the reported condition and
+preview again. Legacy locks without a journal require manual inspection.
+Recovery takes a separate claim under the operation lock. If recovery itself is
+killed, inspect `recovery/owner.json`; after confirming that process has stopped,
+remove only the stale `recovery/` claim and preview again. Do not delete the
+transaction journal or backups. Recovery handles process termination; storage
+failure or power loss can still require manual inspection. Use one root/lockfile
+pair per configuration and do not externally edit checkouts during an operation.
 
 ## Performance and verification
 

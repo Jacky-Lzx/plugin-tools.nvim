@@ -57,15 +57,21 @@ COMMANDS                                                 *:PluginTools*
 :PluginTools explain {id}      Explain ownership, users, configuration and state.
 :PluginTools install [ids...]  Install missing packages, honoring the lockfile.
 :PluginTools update [ids...]   Update selected packages and lock revisions.
+:PluginTools plan [ids...]     Preview exact update commits and required builds.
+:PluginTools apply             Apply the latest session-local reviewed plan.
 :PluginTools restore [ids...]  Restore selected packages to locked commits.
 :PluginTools freeze [ids...]   Record selected current checkout revisions.
 :PluginTools clean             Preview unreferenced owned checkouts.
 :PluginTools clean --apply     Remove those checkouts and lock entries.
+:PluginTools recover           Preview interrupted transaction recovery.
+:PluginTools recover --apply   Apply validated rollback or committed cleanup.
 
 The panel uses / to filter, Space to select, Enter to expand details, l for logs,
 r to refresh, and q to close. u/i/s/f operate on selected nodes or the cursor node;
 c previews cleanup and C applies it. Closing detaches progress observers. The
 panel is loaded only on demand. manager:open() also opens it.
+p previews selected updates and a applies the reviewed commits. R previews
+recovery. Previews resolve Git refs but execute no builds or publication.
 
 Git operations are asynchronous. Updates stage all builds before publication;
 caught errors roll back replaced checkouts. Dirty or unowned checkouts are
@@ -84,7 +90,7 @@ API                                                        *plugin-tools-api*
   local task = m:install({ids = {'my-plugin'}})
   local result, err = task:wait(300000)
 <
-install, update, restore, freeze and clean return tasks. wait pumps the event
+install, update, restore, freeze, clean, plan and recover return tasks. wait pumps the event
 loop; its timeout does not cancel the task. An on_complete(result, err) option
 receives completion without waiting.
 
@@ -93,6 +99,14 @@ returns an unsubscribe function; task:snapshot() copies current progress.
 Successful results include details with before_commit/after_commit and phases.
 task.report also retains structured failure information; task.events keeps the
 last 500 phase/process records. manager.last_operation retains the latest task.
+
+plan():wait() returns a report usable with update({plan=report}) in the same
+manager instance. Apply pins reviewed commits and rejects changed configuration
+or checkouts. Plans do not survive a restart. recover() previews by default;
+recover({dry_run=false}) applies recovery. Journal records and backups survive
+caught recovery failures. Recovery refuses live owners/children, changed or dirty
+checkouts, mismatched ownership, unsafe paths and changed lockfiles. Interrupted
+recovery claims and legacy locks need manual inspection; see README.md.
 
 Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
 strict=true, commands=true, concurrency=4, git_timeout=120000, profile=false.

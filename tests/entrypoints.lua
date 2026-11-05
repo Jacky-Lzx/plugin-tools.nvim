@@ -53,6 +53,32 @@ H.case("health reads state and help tags resolve", function()
   H.eq(vim.bo.filetype, "help")
 end)
 
+H.case("commands preview, apply and recover with explicit argument validation", function()
+  vim.cmd("PluginTools plan")
+  assert(vim.wait(10000, function()
+    return not manager.operation
+  end))
+  assert(manager.last_plan and manager.last_plan.action == "plan")
+  H.eq(vim.bo.filetype, "plugin-tools")
+  vim.cmd("PluginTools apply")
+  assert(vim.wait(10000, function()
+    return not manager.operation
+  end))
+  H.eq(manager.last_plan, nil)
+  H.raises(function()
+    vim.cmd("PluginTools apply")
+  end, "run PluginTools plan first")
+  vim.cmd("PluginTools recover")
+  assert(vim.wait(10000, function()
+    return not manager.operation
+  end))
+  H.eq(manager.last_operation.result.dry_run, true)
+  H.raises(function()
+    vim.cmd("PluginTools recover --unexpected")
+  end, "usage: PluginTools recover")
+  vim.cmd.close()
+end)
+
 H.case("standalone administration example runs without mounting plugins", function()
   local repo = H.repo("example")
   local manifest = H.root .. "/manifest.lua"

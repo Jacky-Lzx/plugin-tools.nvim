@@ -34,7 +34,14 @@ function Task:select(packages)
   for _, p in ipairs(packages) do
     if not self.items[p.id] then
       self.order[#self.order + 1] = p.id
-      self.items[p.id] = { id = p.id, dir = p.dir, source = p.source, phase = "queued", build = p.build ~= nil }
+      self.items[p.id] = {
+        id = p.id,
+        dir = p.dir,
+        source = p.source,
+        phase = "queued",
+        build = p.build ~= nil,
+        build_command = type(p.build) == "table" and vim.deepcopy(p.build) or nil,
+      }
     end
   end
 end
@@ -53,7 +60,7 @@ function Task:emit(phase, id, fields)
     action = self.action,
     phase = phase,
     id = id,
-    elapsed_ms = (vim.uv.hrtime() - self.started_at) / 1e6,
+    elapsed_ms = ((self.finished_at or vim.uv.hrtime()) - self.started_at) / 1e6,
     total = self.total,
     completed = self.completed,
   }, vim.deepcopy(fields))
@@ -107,7 +114,7 @@ function Task:snapshot()
     completed = self.completed,
     details = details,
     failure = vim.deepcopy(self.failure),
-    elapsed_ms = (vim.uv.hrtime() - self.started_at) / 1e6,
+    elapsed_ms = ((self.finished_at or vim.uv.hrtime()) - self.started_at) / 1e6,
   }
 end
 
@@ -115,7 +122,7 @@ function Task:finish(result, err)
   if err and not self.failure then
     self:fail(nil, err)
   end
-  self.done, self.error = true, err
+  self.done, self.error, self.finished_at = true, err, vim.uv.hrtime()
   self.phase = err and "failed" or "done"
   self.report = vim.tbl_extend("force", result or { action = self.action }, self:snapshot(), {
     status = err and "failed" or "success",

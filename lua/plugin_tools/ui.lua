@@ -16,16 +16,30 @@ function View:render()
   local lines = {
     "PluginTools",
     " / filter  <Space> select  <CR> details  u update  i install  s restore  f freeze",
-    " r refresh  l log/status  c clean preview  C clean apply  q close",
+    " p plan  a apply plan  R recovery preview  r refresh  l log/status  c clean preview  C clean apply  q close",
     "Filter: " .. self.filter .. " | Selected: " .. vim.tbl_count(self.selected),
   }
   local task = self.manager.last_operation
+  if self.manager.last_plan then
+    lines[#lines + 1] = "Reviewed plan available: a applies its exact commits."
+  end
   if task then
     lines[#lines + 1] = ("Operation: %s | %s | %d/%d"):format(task.action, task.phase, task.completed, task.total)
     if task.error then
       lines[#lines + 1] = "Error: " .. (task.failure and task.failure.message or task.error):match("[^\n]+")
     elseif task.result and task.result.restart_required then
       lines[#lines + 1] = "Restart Neovim to use changed plugin files."
+    end
+    if task.result and task.result.recovery_required then
+      lines[#lines + 1] = "Cleanup needs recovery: run :PluginTools recover to inspect."
+    end
+    if task.action == "recover" and task.result then
+      if #task.result.steps == 0 then
+        lines[#lines + 1] = "No package recovery steps pending."
+      end
+      for _, step in ipairs(task.result.steps) do
+        lines[#lines + 1] = "Recovery " .. step.action .. ": " .. step.dir
+      end
     end
     if task.action == "clean" and task.result then
       lines[#lines + 1] = "Cleanup "
@@ -66,6 +80,14 @@ function View:render()
           (progress and progress.phase or "") .. "  " .. item.dir
         )
         self.rows[#lines] = item.id
+        if progress and task.action == "plan" and progress.after_commit then
+          lines[#lines + 1] = ("    Plan: %s -> %s | build: %s | components: %s"):format(
+            (progress.before_commit or "missing"):sub(1, 12),
+            progress.after_commit:sub(1, 12),
+            progress.build and "required" or "none",
+            table.concat(progress.components or {}, ", ")
+          )
+        end
         if self.expanded[item.id] then
           for _, line in ipairs(vim.split(vim.inspect(self.manager:explain(item.id)), "\n", { plain = true })) do
             lines[#lines + 1] = "    " .. line
@@ -115,7 +137,7 @@ end
 
 function View:operate(action, opts)
   opts = opts or {}
-  if action ~= "clean" then
+  if action ~= "clean" and action ~= "recover" and not opts.plan then
     local ids = vim.tbl_keys(self.selected)
     if #ids == 0 and self:current() then
       ids = { self:current() }
@@ -194,7 +216,7 @@ function M.open(manager, opts)
       view.mode = view.mode == "log" and "status" or "log"
       view:render()
     end, "Toggle operation log")
-    for key, action in pairs({ u = "update", i = "install", s = "restore", f = "freeze" }) do
+    for key, action in pairs({ u = "update", i = "install", s = "restore", f = "freeze", p = "plan" }) do
       map(key, function()
         view:operate(action)
       end, action)
@@ -202,6 +224,16 @@ function M.open(manager, opts)
     map("c", function()
       view:operate("clean")
     end, "Preview cleanup")
+    map("a", function()
+      if not manager.last_plan then
+        vim.notify("PluginTools: create a plan with p first", vim.log.levels.WARN)
+        return
+      end
+      view:operate("update", { plan = manager.last_plan })
+    end, "Apply reviewed plan")
+    map("R", function()
+      view:operate("recover")
+    end, "Preview crash recovery")
     map("C", function()
       view:operate("clean", { dry_run = false })
     end, "Apply cleanup")
