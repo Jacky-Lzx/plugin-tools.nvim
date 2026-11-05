@@ -13,9 +13,10 @@ end
 H.case("default manager commands inspect and finish asynchronous operations", function()
   H.eq(Tools.has("local"), true)
   vim.cmd("PluginTools status")
-  assert(notices[#notices]:find("local", 1, true))
+  assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("local", 1, true))
   vim.cmd("PluginTools explain local")
-  assert(notices[#notices]:find("referenced_by", 1, true))
+  assert(table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n"):find("referenced_by", 1, true))
+  vim.cmd.close()
   vim.cmd("PluginTools install")
   assert(vim.wait(10000, function()
     return not manager.operation

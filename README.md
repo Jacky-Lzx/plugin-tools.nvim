@@ -190,6 +190,7 @@ manager:has(id)       -- Declared and not known missing; no require(), Git, or s
 manager:activate(id)  -- Configure once; explicit after prerequisites are activated first
 manager:use(id)       -- Activate and return require(main); main is required
 manager:status()      -- Copies of registered/mounted/ready/missing/failed states
+manager:open()        -- Open the status panel (UI module loads on demand)
 manager:explain(id)   -- Package, source, parents, users, dependencies, configuration, state
 ```
 
@@ -224,6 +225,7 @@ on failure. Successful results retain the `packages` ID list and add `details`.
 | `clean()` / `:PluginTools clean` | Preview unreferenced owned packages |
 | `clean({dry_run=false})` / `:PluginTools clean --apply` | Remove those packages and their lock entries |
 | `:PluginTools status` / `:PluginTools explain id` | Inspect state and inclusion reasons |
+| `:PluginTools log` | View the last operation's phase and process log |
 
 Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000, on_progress = function(event) ... end,
 on_complete = function(result, err) ... end }`. IDs select package owners, so
@@ -234,6 +236,16 @@ defaults. `timeout` bounds each process. `commands = false` omits `:PluginTools`
 Package operations never execute plugin configuration. After installing or
 updating, restart Neovim to use new runtime files and configuration; already
 required modules are not unloaded. Commands report completion asynchronously.
+
+`:PluginTools` opens a searchable scratch-buffer panel. `/` filters IDs and
+directories, Space selects nodes, Enter expands their configuration/error details,
+and `l` switches between status and operation logs. `u`, `i`, `s`, and `f` update,
+install, restore, or freeze the selection (or the node under the cursor).
+Components select their shared package automatically. `c` previews cleanup and
+`C` applies cleanup to the complete graph. `r` refreshes; `q` closes the panel.
+The panel subscribes to active tasks and releases its subscription when closed;
+it adds no startup timers or UI dependencies. Operations started through the Lua
+API outside the panel can be attached with `r`. Command completion includes IDs.
 
 ## Update and cleanup guarantees
 

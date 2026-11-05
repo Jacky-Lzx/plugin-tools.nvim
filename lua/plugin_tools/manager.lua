@@ -202,6 +202,10 @@ function Manager:status()
   return out
 end
 
+function Manager:open(opts)
+  return require("plugin_tools.ui").open(self, opts)
+end
+
 function Manager:explain(id)
   local n = self.graph.nodes[id]
   U.check(n, "unknown plugin " .. tostring(id))

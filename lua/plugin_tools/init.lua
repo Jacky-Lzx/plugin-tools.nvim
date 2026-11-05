@@ -14,8 +14,8 @@ function M.setup(opts)
       require("plugin_tools.command").run(current, args.fargs)
     end, {
       nargs = "*",
-      complete = function()
-        return { "status", "explain", "install", "update", "restore", "freeze", "clean" }
+      complete = function(lead, line, cursor)
+        return require("plugin_tools.command").complete(current, lead, line, cursor)
       end,
       desc = "Manage plugin-tools packages",
     })
@@ -30,6 +30,7 @@ for _, method in ipairs({
   "activate",
   "use",
   "status",
+  "open",
   "explain",
   "install",
   "update",

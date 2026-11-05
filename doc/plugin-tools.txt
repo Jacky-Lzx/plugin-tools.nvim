@@ -47,6 +47,7 @@ loading triggers, replay runtime scripts, or unload initialized modules.
 COMMANDS                                                 *:PluginTools*
 
 :PluginTools [status]          Show each plugin's state and directory.
+:PluginTools log               Show the latest operation's process/phase log.
 :PluginTools explain {id}      Explain ownership, users, configuration and state.
 :PluginTools install [ids...]  Install missing packages, honoring the lockfile.
 :PluginTools update [ids...]   Update selected packages and lock revisions.
@@ -54,6 +55,11 @@ COMMANDS                                                 *:PluginTools*
 :PluginTools freeze [ids...]   Record selected current checkout revisions.
 :PluginTools clean             Preview unreferenced owned checkouts.
 :PluginTools clean --apply     Remove those checkouts and lock entries.
+
+The panel uses / to filter, Space to select, Enter to expand details, l for logs,
+r to refresh, and q to close. u/i/s/f operate on selected nodes or the cursor node;
+c previews cleanup and C applies it. Closing detaches progress observers. The
+panel is loaded only on demand. manager:open() also opens it.
 
 Git operations are asynchronous. Updates stage all builds before publication;
 caught errors roll back replaced checkouts. Dirty or unowned checkouts are
