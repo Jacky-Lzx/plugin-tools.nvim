@@ -253,16 +253,26 @@ Package operations never execute plugin configuration. After installing or
 updating, restart Neovim to use new runtime files and configuration; already
 required modules are not unloaded. Commands report completion asynchronously.
 
-`:PluginTools` opens a searchable scratch-buffer panel. `/` filters IDs and
-directories, Space selects nodes, Enter expands their configuration/error details,
-and `l` switches between status and operation logs. `u`, `i`, `s`, and `f` update,
+`:PluginTools` opens a centered, rounded floating panel with a searchable scratch
+buffer, status summary and theme-aware state colors. Columns adapt to the window;
+long paths shorten in the list and wrap in details. `j`/`k` move between plugins.
+`/` filters IDs and directories, Space selects nodes, Enter shows compact details,
+`o` expands the complete configuration/merge history, and `?` shows all shortcuts.
+`l` switches between status and operation logs. `u`, `i`, `s`, and `f` update,
 install, restore, or freeze the selection (or the node under the cursor).
 Components select their shared package automatically. `c` previews cleanup and
 `C` applies cleanup to the complete graph. `p` previews an update and `a` applies
-the reviewed commits. `R` previews recovery. `r` refreshes; `q` closes the panel.
+the reviewed commits. `R` previews recovery. `r` refreshes; `q` or Escape closes.
 The panel subscribes to active tasks and releases its subscription when closed;
 it adds no startup timers or UI dependencies. Operations started through the Lua
 API outside the panel can be attached with `r`. Command completion includes IDs.
+
+Resize and view changes preserve selection and the current plugin. Highlight
+defaults follow `ColorScheme` and respect user overrides: `PluginToolsNormal`,
+`PluginToolsBorder`, `PluginToolsTitle`, `PluginToolsReady`, `PluginToolsActive`,
+`PluginToolsWarning`, `PluginToolsError`, `PluginToolsSelected`,
+`PluginToolsSelectedLine` and `PluginToolsCursorLine`. The panel uses native
+Neovim windows and ordinary Unicode symbols, with no icon or UI dependency.
 
 Update previews clone Git objects into temporary staging to resolve target refs,
 but do not check out files, initialize submodules, generate tags, run builds,

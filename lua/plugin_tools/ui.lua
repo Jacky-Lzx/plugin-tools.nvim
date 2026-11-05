@@ -1,111 +1,129 @@
+local Render = require("plugin_tools.ui.render")
+local Style = require("plugin_tools.ui.style")
+local namespace = vim.api.nvim_create_namespace("plugin-tools-panel")
 local M = {}
 local views = setmetatable({}, { __mode = "k" })
 local View = {}
 View.__index = View
 
+local function geometry()
+  local available_width = math.max(1, vim.o.columns - 4)
+  local available_height = math.max(1, vim.o.lines - vim.o.cmdheight - 4)
+  local width = math.min(132, available_width, math.max(36, math.floor(vim.o.columns * 0.88)))
+  local height = math.min(40, available_height, math.max(10, math.floor(available_height * 0.84)))
+  return {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((vim.o.lines - vim.o.cmdheight - height - 2) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
+    title = " " .. Render.fit("Plugin Tools", math.max(1, width - 2)) .. " ",
+    title_pos = "left",
+    footer = " " .. Render.fit("q Close   l Log   r Refresh   ? Help", math.max(1, width - 2)) .. " ",
+    footer_pos = "right",
+  }
+end
+
 function View:valid()
   return vim.api.nvim_buf_is_valid(self.buf)
+end
+
+function View:window()
+  local win = self.win
+  if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == self.buf then
+    return win
+  end
+  win = vim.fn.bufwinid(self.buf)
+  return win ~= -1 and win or nil
 end
 
 function View:render()
   if not self:valid() then
     return
   end
-  local win = vim.fn.bufwinid(self.buf)
-  local current = win ~= -1 and self.rows and self.rows[vim.api.nvim_win_get_cursor(win)[1]]
-  local lines = {
-    "PluginTools",
-    " / filter  <Space> select  <CR> details  u update  i install  s restore  f freeze",
-    " p plan  a apply plan  R recovery preview  r refresh  l log/status  c clean preview  C clean apply  q close",
-    "Filter: " .. self.filter .. " | Selected: " .. vim.tbl_count(self.selected),
-  }
-  local task = self.manager.last_operation
-  if self.manager.last_plan then
-    lines[#lines + 1] = "Reviewed plan available: a applies its exact commits."
+  local win = self:window()
+  local cursor = win and vim.api.nvim_win_get_cursor(win)
+  local viewport = win and vim.api.nvim_win_call(win, vim.fn.winsaveview)
+  local current = cursor and self.owners and self.owners[cursor[1]]
+  local offset = current and self.by_id and (cursor[1] - self.by_id[current]) or 0
+  self.positions = self.positions or {}
+  if self.rendered_mode and cursor then
+    self.positions[self.rendered_mode] = { id = current, offset = offset, row = cursor[1], topline = viewport.topline }
   end
-  if task then
-    lines[#lines + 1] = ("Operation: %s | %s | %d/%d"):format(task.action, task.phase, task.completed, task.total)
-    if task.error then
-      lines[#lines + 1] = "Error: " .. (task.failure and task.failure.message or task.error):match("[^\n]+")
-    elseif task.result and task.result.restart_required then
-      lines[#lines + 1] = "Restart Neovim to use changed plugin files."
-    end
-    if task.result and task.result.recovery_required then
-      lines[#lines + 1] = "Cleanup needs recovery: run :PluginTools recover to inspect."
-    end
-    if task.action == "recover" and task.result then
-      if #task.result.steps == 0 then
-        lines[#lines + 1] = "No package recovery steps pending."
-      end
-      for _, step in ipairs(task.result.steps) do
-        lines[#lines + 1] = "Recovery " .. step.action .. ": " .. step.dir
-      end
-    end
-    if task.action == "clean" and task.result then
-      lines[#lines + 1] = "Cleanup "
-        .. (task.result.dry_run and "preview: " or "removed: ")
-        .. table.concat(task.result.packages, ", ")
-    end
-  end
-  lines[#lines + 1] = ""
-  self.rows = {}
-  if self.mode == "log" then
-    lines[#lines + 1] = "Operation log"
-    for _, event in ipairs(task and task.events or {}) do
-      lines[#lines + 1] = ("%8.1f ms  %-14s %s"):format(event.elapsed_ms, event.phase, event.id or "")
-      if event.command then
-        lines[#lines + 1] = "  " .. table.concat(event.command, " ")
-      end
-      for _, field in ipairs({ "stdout", "stderr" }) do
-        for _, line in ipairs(vim.split(event[field] or "", "\n", { plain = true, trimempty = true })) do
-          lines[#lines + 1] = "  " .. line
-        end
-      end
-      if event.error then
-        for _, line in ipairs(vim.split(event.error.message, "\n", { plain = true })) do
-          lines[#lines + 1] = "  " .. line
-        end
-      end
-    end
-  else
-    lines[#lines + 1] = "  Plugin                        Runtime      Location  Operation"
-    for _, item in ipairs(self.manager:status()) do
-      if (item.id .. " " .. item.dir):lower():find(self.filter:lower(), 1, true) then
-        local progress = task and task.items[item.package]
-        lines[#lines + 1] = ("%s %-29s %-12s %-9s %s"):format(
-          self.selected[item.id] and "*" or " ",
-          item.id,
-          item.state.phase,
-          item.managed and "managed" or "local",
-          (progress and progress.phase or "") .. "  " .. item.dir
-        )
-        self.rows[#lines] = item.id
-        if progress and task.action == "plan" and progress.after_commit then
-          lines[#lines + 1] = ("    Plan: %s -> %s | build: %s | components: %s"):format(
-            (progress.before_commit or "missing"):sub(1, 12),
-            progress.after_commit:sub(1, 12),
-            progress.build and "required" or "none",
-            table.concat(progress.components or {}, ", ")
-          )
-        end
-        if self.expanded[item.id] then
-          for _, line in ipairs(vim.split(vim.inspect(self.manager:explain(item.id)), "\n", { plain = true })) do
-            lines[#lines + 1] = "    " .. line
-          end
-        end
-      end
-    end
-  end
+  local anchor = self.positions[self.mode]
+  local panel = Render.render(self, win and vim.api.nvim_win_get_width(win) or vim.o.columns)
+  self.rows, self.owners, self.by_id = panel.rows, panel.owners, panel.by_id
+  self.content_start = panel.content_start
   vim.bo[self.buf].modifiable = true
-  vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, lines)
-  vim.bo[self.buf].modifiable = false
-  if current and win ~= -1 then
-    for row, id in pairs(self.rows) do
-      if id == current then
-        vim.api.nvim_win_set_cursor(win, { row, 0 })
-        break
+  vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, panel.lines)
+  vim.bo[self.buf].modifiable, vim.bo[self.buf].modified = false, false
+  vim.api.nvim_buf_clear_namespace(self.buf, namespace, 0, -1)
+  for _, row in ipairs(panel.selected) do
+    vim.api.nvim_buf_set_extmark(
+      self.buf,
+      namespace,
+      row,
+      0,
+      { line_hl_group = "PluginToolsSelectedLine", priority = 50 }
+    )
+  end
+  for _, mark in ipairs(panel.marks) do
+    vim.api.nvim_buf_set_extmark(self.buf, namespace, mark.row, mark.start, {
+      end_col = mark.finish,
+      hl_group = mark.group,
+      priority = 100,
+    })
+  end
+  if win then
+    current, offset = anchor and anchor.id, anchor and anchor.offset or 0
+    local target = current and panel.by_id[current]
+    if target then
+      if panel.owners[target + offset] == current then
+        target = target + offset
+      end
+    elseif self.mode == "status" then
+      for row in pairs(panel.rows) do
+        target = math.min(target or row, row)
       end
     end
+    if not target then
+      target = math.min(#panel.lines, math.max(panel.content_start, anchor and anchor.row or 1))
+    end
+    local top = anchor and anchor.topline or 1
+    if top > 1 then
+      top = math.max(1, top + target - anchor.row)
+    end
+    local first
+    for row in pairs(panel.rows) do
+      first = math.min(first or row, row)
+    end
+    if target == first then
+      top = 1
+    end
+    vim.api.nvim_win_call(win, function()
+      vim.fn.winrestview({ lnum = target, col = 0, topline = top, leftcol = 0 })
+    end)
+  end
+  self.rendered_mode = self.mode
+end
+
+function View:move(direction)
+  if self.mode ~= "status" then
+    vim.cmd.normal({ args = { direction > 0 and "j" or "k" }, bang = true })
+    return
+  end
+  local current, target = vim.api.nvim_win_get_cursor(0)[1]
+  for row in pairs(self.rows) do
+    if direction > 0 and row > current then
+      target = math.min(target or row, row)
+    elseif direction < 0 and row < current then
+      target = math.max(target or row, row)
+    end
+  end
+  if target then
+    vim.api.nvim_win_set_cursor(0, { target, 0 })
   end
 end
 
@@ -132,7 +150,7 @@ function View:attach(task)
 end
 
 function View:current()
-  return self.rows[vim.api.nvim_win_get_cursor(0)[1]]
+  return self.owners[vim.api.nvim_win_get_cursor(0)[1]]
 end
 
 function View:operate(action, opts)
@@ -166,13 +184,19 @@ end
 
 function M.open(manager, opts)
   opts = opts or {}
+  Style.setup()
   local view = views[manager]
   if not view or not view:valid() then
-    view = setmetatable(
-      { manager = manager, buf = vim.api.nvim_create_buf(false, true), filter = "", selected = {}, expanded = {} },
-      View
-    )
+    view = setmetatable({
+      manager = manager,
+      buf = vim.api.nvim_create_buf(false, true),
+      filter = "",
+      selected = {},
+      expanded = {},
+      full = {},
+    }, View)
     views[manager] = view
+    view.group = vim.api.nvim_create_augroup("PluginToolsPanel" .. view.buf, { clear = true })
     vim.bo[view.buf].bufhidden = "wipe"
     vim.bo[view.buf].filetype = "plugin-tools"
     vim.api.nvim_buf_set_name(view.buf, "plugin-tools://" .. view.buf)
@@ -184,9 +208,28 @@ function M.open(manager, opts)
         { buffer = view.buf, silent = true, nowait = true, desc = "PluginTools: " .. desc }
       )
     end
-    map("q", function()
-      vim.cmd.close()
-    end, "Close")
+    local function close()
+      local win = view:window()
+      if win then
+        vim.api.nvim_win_close(win, true)
+      end
+    end
+    map("q", close, "Close")
+    map("<Esc>", close, "Close")
+    map("j", function()
+      view:move(1)
+    end, "Next plugin")
+    map("k", function()
+      view:move(-1)
+    end, "Previous plugin")
+    map("?", function()
+      if view.mode == "help" then
+        view.mode = view.return_mode or "status"
+      else
+        view.return_mode, view.mode = view.mode, "help"
+      end
+      view:render()
+    end, "Help")
     map("r", function()
       view:attach(manager.last_operation)
     end, "Refresh")
@@ -212,6 +255,13 @@ function M.open(manager, opts)
         view:render()
       end
     end, "Details")
+    map("o", function()
+      local id = view:current()
+      if id then
+        view.expanded[id], view.full[id] = true, not view.full[id]
+        view:render()
+      end
+    end, "Full configuration")
     map("l", function()
       view.mode = view.mode == "log" and "status" or "log"
       view:render()
@@ -238,6 +288,7 @@ function M.open(manager, opts)
       view:operate("clean", { dry_run = false })
     end, "Apply cleanup")
     vim.api.nvim_create_autocmd("BufWipeout", {
+      group = view.group,
       buffer = view.buf,
       once = true,
       callback = function()
@@ -245,12 +296,32 @@ function M.open(manager, opts)
           view.unsubscribe()
         end
         views[manager] = nil
+        pcall(vim.api.nvim_del_augroup_by_id, view.group)
       end,
     })
     vim.api.nvim_create_autocmd("BufEnter", {
+      group = view.group,
       buffer = view.buf,
       callback = function()
         view:attach(manager.last_operation)
+      end,
+    })
+    vim.api.nvim_create_autocmd("WinResized", {
+      group = view.group,
+      callback = function()
+        view:refresh()
+      end,
+    })
+    vim.api.nvim_create_autocmd("VimResized", {
+      group = view.group,
+      callback = function()
+        local win = view:window()
+        if win then
+          if vim.api.nvim_win_get_config(win).relative ~= "" then
+            vim.api.nvim_win_set_config(win, geometry())
+          end
+          view:refresh()
+        end
       end,
     })
   end
@@ -259,15 +330,22 @@ function M.open(manager, opts)
     manager:explain(opts.id)
     view.expanded[opts.id], view.filter = true, opts.id
   end
-  local win = vim.fn.bufwinid(view.buf)
-  if win ~= -1 then
+  local win = view:window()
+  if win then
     vim.api.nvim_set_current_win(win)
   else
-    vim.cmd("botright 16split")
-    vim.api.nvim_win_set_buf(0, view.buf)
+    win = vim.api.nvim_open_win(view.buf, true, geometry())
   end
+  view.win = win
   vim.wo.wrap, vim.wo.number, vim.wo.relativenumber = false, false, false
   vim.wo.signcolumn = "no"
+  vim.wo.cursorline = true
+  vim.wo.cursorlineopt = "line"
+  vim.wo.foldcolumn, vim.wo.colorcolumn, vim.wo.winbar, vim.wo.statuscolumn = "0", "", "", ""
+  vim.wo.spell, vim.wo.list = false, false
+  vim.wo.scrolloff, vim.wo.sidescrolloff = 0, 0
+  vim.wo.winhighlight =
+    "Normal:PluginToolsNormal,FloatBorder:PluginToolsBorder,FloatTitle:PluginToolsTitle,FloatFooter:PluginToolsMuted,CursorLine:PluginToolsCursorLine"
   view:attach(manager.last_operation)
   return view
 end

@@ -1,0 +1,470 @@
+local Style = require("plugin_tools.ui.style")
+local M = {}
+local width = vim.fn.strdisplaywidth
+
+local function clean(value)
+  return tostring(value):gsub("[%c]", " ")
+end
+
+local function error_text(value)
+  if type(value) == "string" then
+    return value
+  end
+  if type(value) == "table" and type(value.message) == "string" then
+    return value.message
+  end
+  return vim.inspect(value)
+end
+
+function M.fit(value, limit, suffix)
+  value, limit = clean(value), math.max(0, limit)
+  if width(value) <= limit then
+    return value
+  end
+  suffix = suffix == nil and "…" or suffix
+  if width(suffix) > limit then
+    return ""
+  end
+  local low, high = 0, vim.fn.strchars(value)
+  while low < high do
+    local middle = math.ceil((low + high) / 2)
+    if width(vim.fn.strcharpart(value, 0, middle)) + width(suffix) <= limit then
+      low = middle
+    else
+      high = middle - 1
+    end
+  end
+  return vim.fn.strcharpart(value, 0, low) .. suffix
+end
+
+local function pad(value, limit)
+  value = M.fit(value, limit)
+  return value .. string.rep(" ", math.max(0, limit - width(value)))
+end
+
+local function piece(value, available)
+  local part = M.fit(value, available, "")
+  if part == "" and value ~= "" then
+    part = vim.fn.strcharpart(value, 0, 1)
+  elseif #part < #value then
+    local space = part:match("^.*()%s")
+    if space and width(part:sub(1, space - 1)) >= available / 2 then
+      return part:sub(1, space - 1), value:sub(space + 1)
+    end
+  end
+  return part, value:sub(#part + 1)
+end
+
+local function home(path)
+  local directory = vim.uv.os_homedir()
+  return directory
+      and (path == directory or vim.startswith(path, directory .. "/"))
+      and ("~" .. path:sub(#directory + 1))
+    or path
+end
+
+local function path_label(path, limit)
+  path = home(path)
+  if width(path) <= limit then
+    return path
+  end
+  local tail = vim.fs.basename(path)
+  if width(tail) + 3 < limit then
+    return M.fit(path:sub(1, #path - #tail), limit - width(tail) - 1) .. "/" .. tail
+  end
+  return M.fit(path, limit)
+end
+
+local Builder = {}
+Builder.__index = Builder
+
+function Builder:line(parts)
+  parts = type(parts) == "string" and { { parts } } or parts or {}
+  local text, marks = "  ", {}
+  for _, part in ipairs(parts) do
+    local value = clean(part[1])
+    if part[2] then
+      marks[#marks + 1] = { start = #text, finish = #text + #value, group = part[2] }
+    end
+    text = text .. value
+  end
+  text = M.fit(text, math.max(1, self.window_width - 2), "")
+  local row = #self.lines + 1
+  self.lines[row] = text
+  for _, mark in ipairs(marks) do
+    if mark.start < #text then
+      mark.row, mark.finish = row - 1, math.min(mark.finish, #text)
+      self.marks[#self.marks + 1] = mark
+    end
+  end
+  return row
+end
+
+function Builder:wrap(value, indent, group)
+  value, indent = clean(value), indent or ""
+  local available = math.max(1, self.inner - width(indent))
+  repeat
+    local part, rest = piece(value, available)
+    self:line({ { indent .. part, group } })
+    value = rest
+  until value == ""
+end
+
+function Builder:detail(label, value, group)
+  local size = self.inner < 50 and 10 or 15
+  local prefix = "    " .. pad(label, size)
+  local available = math.max(1, self.inner - width(prefix))
+  value = clean(value)
+  repeat
+    local part, rest = piece(value, available)
+    self:line({ { prefix, "PluginToolsMuted" }, { part, group or "PluginToolsName" } })
+    value, prefix = rest, string.rep(" ", width(prefix))
+  until value == ""
+end
+
+local function dependencies(map)
+  local names = {}
+  for id, optional in pairs(map) do
+    names[#names + 1] = id .. (optional and " (optional)" or "")
+  end
+  table.sort(names)
+  return #names > 0 and table.concat(names, ", ") or "None"
+end
+
+local function details(b, view, item, progress)
+  local info = view.manager:explain(item.id)
+  b:detail("Directory", home(info.dir), "PluginToolsPath")
+  if info.package ~= info.id then
+    b:detail("Package", info.package)
+  end
+  b:detail("Source", info.source or "Local checkout")
+  b:detail("Dependencies", dependencies(info.dependencies))
+  b:detail("Referenced by", #info.referenced_by > 0 and table.concat(info.referenced_by, ", ") or "None")
+  if #info.after > 0 then
+    b:detail("Starts after", table.concat(info.after, ", "))
+  end
+  for index, declaration in ipairs(info.declarations or {}) do
+    b:detail(
+      index == 1 and "Declared in" or "",
+      declaration.origin .. "  ·  " .. declaration.position .. (declaration.enabled and "" or "  [disabled]")
+    )
+  end
+  if progress then
+    b:detail("Operation", progress.phase, Style.phase(progress.phase))
+    if progress.before_commit then
+      b:detail("Before", progress.before_commit)
+    end
+    if progress.after_commit then
+      b:detail("After", progress.after_commit)
+    end
+  end
+  local error_message = item.state.error or (progress and progress.error and progress.error.message)
+  if error_message then
+    error_message = error_text(error_message)
+    local first = error_message:match("[^\n]+") or error_message
+    local location, message = first:match("^(.-:%d+):%s*(.*)$")
+    b:detail("Error", message or first, "PluginToolsError")
+    if location then
+      b:detail("Location", home(location), "PluginToolsMuted")
+    end
+  end
+  b:line({
+    { "    o ", "PluginToolsKey" },
+    { view.full[item.id] and "Hide full configuration" or "Full configuration & merge history", "PluginToolsMuted" },
+  })
+  if view.full[item.id] then
+    for _, line in ipairs(vim.split(vim.inspect(info), "\n", { plain = true })) do
+      b:wrap(line, "    ", "PluginToolsName")
+    end
+  end
+  b:line()
+end
+
+local function columns(inner, maximum, with_operation)
+  if inner >= 106 then
+    local name = math.min(34, math.max(26, maximum + 4))
+    return {
+      name = name,
+      state = 11,
+      source = 8,
+      operation = with_operation and 13 or nil,
+      path = inner - name - (with_operation and 40 or 25),
+    }
+  elseif inner >= 76 then
+    local name = math.min(30, math.max(24, maximum + 4))
+    return { name = name, state = 11, source = 8, path = inner - name - 25 }
+  elseif inner >= 52 then
+    return { name = inner - 23, state = 11, source = 8 }
+  end
+  local state = math.min(10, math.floor(inner * 0.35))
+  return { name = math.max(1, inner - state - 2), state = state }
+end
+
+local function plugins(b, view, items, task)
+  local maximum, visible = 0, {}
+  for _, item in ipairs(items) do
+    if (item.id .. " " .. item.dir):lower():find(view.filter:lower(), 1, true) then
+      visible[#visible + 1] = item
+      maximum = math.max(maximum, width(item.id))
+    end
+  end
+  local c = columns(b.inner, maximum, task ~= nil and task.total > 0)
+  local header =
+    { { pad("    PLUGIN", c.name), "PluginToolsHeader" }, { "  " }, { pad("STATE", c.state), "PluginToolsHeader" } }
+  for _, key in ipairs({ "source", "operation", "path" }) do
+    if c[key] then
+      header[#header + 1] = { "  " }
+      header[#header + 1] = { pad(key == "path" and "DIRECTORY" or key:upper(), c[key]), "PluginToolsHeader" }
+    end
+  end
+  b:line(header)
+  for _, item in ipairs(visible) do
+    local progress = task and task.items[item.package]
+    local selected = view.selected[item.id]
+    local prefix = (selected and "●" or "○") .. " " .. (view.expanded[item.id] and "▾" or "▸") .. " "
+    if item.id ~= item.package then
+      prefix = prefix .. "  "
+    end
+    local state = not c.operation and task and not task.done and progress and progress.phase or item.state.phase
+    local parts = {
+      { M.fit(prefix, c.name), selected and "PluginToolsSelected" or "PluginToolsMuted" },
+      { pad(item.id, math.max(0, c.name - width(prefix))), selected and "PluginToolsSelected" or "PluginToolsName" },
+      { "  " },
+      { pad(state, c.state), Style.phase(state) },
+    }
+    if c.source then
+      parts[#parts + 1] = { "  " }
+      parts[#parts + 1] = {
+        pad(item.managed and "managed" or "local", c.source),
+        item.managed and "PluginToolsPath" or "PluginToolsMuted",
+      }
+    end
+    if c.operation then
+      parts[#parts + 1] = { "  " }
+      parts[#parts + 1] = {
+        pad(progress and progress.phase or "—", c.operation),
+        progress and Style.phase(progress.phase) or "PluginToolsMuted",
+      }
+    end
+    if c.path then
+      parts[#parts + 1] = { "  " }
+      parts[#parts + 1] = { path_label(item.dir, c.path), "PluginToolsMuted" }
+    end
+    local row = b:line(parts)
+    b.rows[row], b.by_id[item.id] = item.id, row
+    if selected then
+      b.selected[#b.selected + 1] = row - 1
+    end
+    if progress and task.action == "plan" and progress.after_commit then
+      b:wrap(
+        ("%s → %s  ·  build: %s"):format(
+          (progress.before_commit or "missing"):sub(1, 12),
+          progress.after_commit:sub(1, 12),
+          progress.build and "required" or "none"
+        ),
+        "    ",
+        "PluginToolsActive"
+      )
+    end
+    if view.expanded[item.id] then
+      details(b, view, item, progress)
+    end
+    for owned = row, #b.lines do
+      b.owners[owned] = item.id
+    end
+  end
+  if #visible == 0 then
+    b:line()
+    b:line({ { "No plugins match this filter.", "PluginToolsMuted" } })
+    b:line({ { "/ ", "PluginToolsKey" }, { "Change or clear the filter to see plugins.", "PluginToolsMuted" } })
+  end
+end
+
+local function log(b, task)
+  if not task or #task.events == 0 then
+    b:line({ { "No operation recorded yet.", "PluginToolsMuted" } })
+    return
+  end
+  for _, event in ipairs(task.events) do
+    b:line({
+      { ("%8.1f ms  "):format(event.elapsed_ms), "PluginToolsMuted" },
+      { event.phase, Style.phase(event.phase) },
+      { event.id and ("  " .. event.id) or "", "PluginToolsName" },
+    })
+    if event.command then
+      b:wrap("$ " .. table.concat(event.command, " "), "    ", "PluginToolsMuted")
+    end
+    for _, field in ipairs({ "stdout", "stderr" }) do
+      for _, line in ipairs(vim.split(event[field] or "", "\n", { plain = true, trimempty = true })) do
+        b:wrap(line, "    ", field == "stderr" and event.exit_code ~= 0 and "PluginToolsError" or "PluginToolsName")
+      end
+    end
+    if event.error then
+      for _, line in ipairs(vim.split(error_text(event.error.message), "\n", { plain = true })) do
+        b:wrap(line, "    ", "PluginToolsError")
+      end
+    end
+  end
+end
+
+local function help(b)
+  local sections = {
+    {
+      "Navigate",
+      {
+        { "j / k", "Move between plugins" },
+        { "/", "Filter names and directories" },
+        { "Space", "Select or deselect a plugin" },
+        { "Enter", "Show compact details" },
+        { "o", "Show complete configuration and merge history" },
+      },
+    },
+    {
+      "Manage selection",
+      {
+        { "p", "Preview update commits and builds" },
+        { "a", "Apply the reviewed plan" },
+        { "u / i", "Update / install" },
+        { "s / f", "Restore locked revisions / freeze current revisions" },
+      },
+    },
+    {
+      "Inspect & maintain",
+      {
+        { "l", "Switch plugins / operation log" },
+        { "r", "Refresh status" },
+        { "R", "Preview crash recovery" },
+        { "c / C", "Preview / apply cleanup of all unused packages" },
+        { "?", "Return to the previous view" },
+        { "q / Esc", "Close the panel" },
+      },
+    },
+  }
+  for _, section in ipairs(sections) do
+    b:line({ { section[1], "PluginToolsTitle" } })
+    for _, entry in ipairs(section[2]) do
+      b:detail(entry[1], entry[2])
+    end
+    b:line()
+  end
+end
+
+function M.render(view, window_width)
+  local b = setmetatable({
+    window_width = window_width,
+    inner = math.max(1, window_width - 4),
+    lines = {},
+    marks = {},
+    rows = {},
+    owners = {},
+    by_id = {},
+    selected = {},
+  }, Builder)
+  local items, task = view.manager:status(), view.manager.last_operation
+  b:line()
+  b:line({
+    { "Plugins", view.mode == "status" and "PluginToolsTabActive" or "PluginToolsTab" },
+    { "   /   ", "PluginToolsMuted" },
+    { "Operation log", view.mode == "log" and "PluginToolsTabActive" or "PluginToolsTab" },
+    { view.mode == "help" and "   /   Help" or "", "PluginToolsTabActive" },
+  })
+  local counts, summary = {}, { { #items .. (#items == 1 and " plugin" or " plugins"), "PluginToolsTitle" } }
+  for _, item in ipairs(items) do
+    counts[item.state.phase] = (counts[item.state.phase] or 0) + 1
+  end
+  for _, phase in ipairs({ "failed", "missing", "ready", "mounted", "registered" }) do
+    if counts[phase] then
+      summary[#summary + 1] = { "  ·  ", "PluginToolsMuted" }
+      summary[#summary + 1] = { counts[phase] .. " " .. phase, Style.phase(phase) }
+    end
+  end
+  b:line(summary)
+  local selected = vim.tbl_count(view.selected) .. " selected"
+  local filter = M.fit(
+    "Filter: " .. (view.filter ~= "" and view.filter or "all plugins"),
+    math.max(1, b.inner - width(selected) - 2)
+  )
+  b:line({
+    { filter, "PluginToolsMuted" },
+    { string.rep(" ", math.max(2, b.inner - width(filter) - width(selected))) },
+    { selected, next(view.selected) and "PluginToolsSelected" or "PluginToolsMuted" },
+  })
+  if view.mode ~= "help" then
+    if b.inner >= 76 then
+      b:line({
+        { "p ", "PluginToolsKey" },
+        { "Plan    ", "PluginToolsMuted" },
+        { "u ", "PluginToolsKey" },
+        { "Update    ", "PluginToolsMuted" },
+        { "/ ", "PluginToolsKey" },
+        { "Filter    ", "PluginToolsMuted" },
+        { "Space ", "PluginToolsKey" },
+        { "Select    ", "PluginToolsMuted" },
+        { "Enter ", "PluginToolsKey" },
+        { "Details    ", "PluginToolsMuted" },
+        { "? ", "PluginToolsKey" },
+        { "Help", "PluginToolsMuted" },
+      })
+    else
+      b:line({
+        { "/ ", "PluginToolsKey" },
+        { "Filter   ", "PluginToolsMuted" },
+        { "Space ", "PluginToolsKey" },
+        { "Select   ", "PluginToolsMuted" },
+        { "? ", "PluginToolsKey" },
+        { "Help", "PluginToolsMuted" },
+      })
+    end
+  end
+  if task then
+    b:line()
+    local elapsed = (task.finished_at or vim.uv.hrtime()) - task.started_at
+    b:line({
+      { task.action:upper() .. "  ", "PluginToolsTitle" },
+      { task.phase, Style.phase(task.phase) },
+      { ("  ·  %d/%d packages  ·  %.1fs"):format(task.completed, task.total, elapsed / 1e9), "PluginToolsMuted" },
+    })
+    if task.error then
+      b:wrap(
+        "Error: " .. error_text(task.failure and task.failure.message or task.error):match("[^\n]+"),
+        "",
+        "PluginToolsError"
+      )
+    elseif task.result and task.result.restart_required then
+      b:wrap("Restart Neovim to use changed plugin files.", "", "PluginToolsWarning")
+    end
+    if task.result and task.result.recovery_required then
+      b:wrap("Cleanup needs recovery: :PluginTools recover", "", "PluginToolsWarning")
+    end
+    if task.action == "recover" and task.result then
+      if #task.result.steps == 0 then
+        b:wrap("No package recovery steps pending.", "", "PluginToolsMuted")
+      end
+      for _, step in ipairs(task.result.steps) do
+        b:wrap("Recovery " .. step.action .. ": " .. step.dir, "", "PluginToolsWarning")
+      end
+    elseif task.action == "clean" and task.result then
+      b:wrap(
+        "Cleanup " .. (task.result.dry_run and "preview: " or "removed: ") .. table.concat(task.result.packages, ", "),
+        "",
+        "PluginToolsMuted"
+      )
+    end
+  end
+  if view.manager.last_plan then
+    b:wrap("Reviewed plan available  ·  a Apply exact commits", "", "PluginToolsActive")
+  end
+  b:line({ { string.rep("─", math.max(1, math.floor(b.inner / width("─")))), "PluginToolsBorder" } })
+  b.content_start = #b.lines + 1
+  if view.mode == "help" then
+    help(b)
+  elseif view.mode == "log" then
+    log(b, task)
+  else
+    plugins(b, view, items, task)
+  end
+  b:line()
+  return b
+end
+
+return M

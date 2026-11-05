@@ -66,10 +66,15 @@ COMMANDS                                                 *:PluginTools*
 :PluginTools recover           Preview interrupted transaction recovery.
 :PluginTools recover --apply   Apply validated rollback or committed cleanup.
 
-The panel uses / to filter, Space to select, Enter to expand details, l for logs,
-r to refresh, and q to close. u/i/s/f operate on selected nodes or the cursor node;
+The centered rounded panel adapts columns to the window and follows the current
+colorscheme. j/k move between plugins, / filters, Space selects, Enter shows
+compact details, o expands full configuration, ? shows help, and l toggles logs.
+r refreshes and q/Escape closes. u/i/s/f operate on selected nodes or the cursor node;
 c previews cleanup and C applies it. Closing detaches progress observers. The
 panel is loaded only on demand. manager:open() also opens it.
+Selection and cursor survive resize/view changes. PluginToolsReady/Active/Warning/
+Error color states; PluginToolsSelected/SelectedLine show selection. Override
+those groups or PluginToolsNormal/Border/Title/CursorLine in your theme.
 p previews selected updates and a applies the reviewed commits. R previews
 recovery. Previews resolve Git refs but execute no builds or publication.
 
