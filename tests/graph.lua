@@ -81,6 +81,7 @@ H.case("conflicting declarations and unsafe paths fail", function()
     { base, { id = "a", dir = "/elsewhere" } },
     { { id = "../bad", dir = H.root } },
     { { id = "a", dir = H.root, event = "VeryLazy" } },
+    { { id = "a", dir = H.root, bootstrap = function() end } },
     { { id = "a", dir = H.root, children = { { id = "child", path = "../../escape" } } } },
     { { id = "a", dir = H.root, children = { { id = "child", version = "main" } } } },
   }) do

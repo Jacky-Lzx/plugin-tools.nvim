@@ -14,7 +14,9 @@ SETUP                                                     *plugin-tools-setup*
 Call setup during init.lua, before native plugin loading. Installation is
 explicit; startup never downloads packages. Use new(options) for an independent
 manager, run install():wait(), and restart before normal startup. Alternatively,
-strict=false permits startup with missing directories to run installation.
+strict=false permits startup with missing directories. If startup fails after
+manager creation, status, health checks and package commands remain available;
+initialization errors are retained and are not automatically retried.
 
 COMPOSITION                                         *plugin-tools-composition*
 
@@ -25,8 +27,10 @@ Repeated compatible declarations merge options and share installation.
 
 Root nodes default to start=true; children default to start=false. main names
 the module whose setup(opts) runs on activation. config(ctx) replaces setup;
-config=false suppresses setup. bootstrap(ctx) is an optional lightweight startup
-callback. enabled=false omits that contribution and its subtree.
+config=false suppresses setup. enabled=false omits that contribution and its
+subtree. There is no separate bootstrap phase. Plugins own commands, APIs and
+feature events; personal mappings and adapters belong in config(ctx). Keep setup
+lightweight and defer expensive internals inside the plugin.
 
 dependencies contains IDs or {id='other', optional=true}. It guarantees declared
 availability, without initialization or activation ordering. after explicitly

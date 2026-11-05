@@ -109,6 +109,18 @@ Managed roots are inserted before the built-in runtime, preserving preceding
 configuration directories. Managed `after/` directories precede existing
 configuration `after/` directories so user overrides still apply last.
 
+## Entry-point ownership
+
+Plugins own their commands, public APIs, and feature-specific events. Keep their
+`setup()` lightweight: save options and register native entry points, then load
+heavy implementations when those entry points run. Personal keymaps and
+cross-plugin adapters belong in the configuration's `config(ctx)` callback.
+The manager has one configuration phase and no separate `bootstrap` hook.
+
+For example, a plugin's lightweight setup may register `:MyPreview`; your config
+calls setup and maps `<leader>p` to that command. The command callback loads the
+renderer itself. Neither the plugin nor the keymap needs to know the manager.
+
 ## Specification
 
 Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
@@ -128,7 +140,6 @@ Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
 | `start` | Initialize during startup; defaults true for roots, false for children |
 | `main` | Module passed to `require()` on activation; default activation calls its `setup(opts)` |
 | `opts` | Configuration table, copied before passing to plugin code |
-| `bootstrap` | Optional lightweight `function(ctx)` run for every mounted node before startup activation |
 | `config` | `function(ctx)` replacing default setup, or false to skip automatic setup |
 | `build` | Package-owner-only argv list, or `function({ id, dir })`; runs in staging |
 
@@ -156,12 +167,18 @@ initialization cycles and recursive activation report the cycle path.
 `ctx` contains `id`, `dir`, a private `opts` copy, and `has(id)`, `activate(id)`,
 and `use(id)` closures. Those closures accept only dependencies declared by that
 node. `has()` inspects availability without loading modules. A context uses dot
-calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`).
+calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`). The `opts` field is materialized and cached on
+first access; a bootstrap that only installs entry points does not copy it.
+Bootstrap and configuration contexts receive independent copies. Graph option
+merges mutate only manager-owned tables, copying incoming values once; caller
+specifications and other nodes remain isolated.
 
 ## Lua API and commands
 
 `require("plugin_tools").setup(options)` creates, starts, and returns the default
-manager. Call it once. Top-level methods forward to that manager. `new(options)`
+manager. The manager and commands remain available for status, health checks,
+and package operations if startup configuration fails. Failed initialization is
+not retried automatically. Call setup once. Top-level methods forward to that manager. `new(options)`
 creates an independent instance without mounting or initializing anything;
 call `manager:start()` when ready. Start is idempotent.
 

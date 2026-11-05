@@ -111,8 +111,8 @@ H.case("explicit prerequisites initialize before demand-loaded component", funct
       {
         id = "parent",
         dir = H.root,
-        bootstrap = function()
-          events[#events + 1] = "bootstrap"
+        config = function()
+          events[#events + 1] = "parent"
         end,
         children = {
           {
@@ -132,9 +132,9 @@ H.case("explicit prerequisites initialize before demand-loaded component", funct
       },
     },
   }):start()
-  H.eq(events, { "bootstrap" })
+  H.eq(events, { "parent" })
   m:activate("second")
-  H.eq(events, { "bootstrap", "first", "second" })
+  H.eq(events, { "parent", "first", "second" })
 end)
 
 H.case("runtime cycles and failed initialization are recorded", function()
@@ -201,21 +201,21 @@ H.case("configuration and inspection return isolated option copies", function()
   H.eq(m:explain("a").opts.value, 1)
 end)
 
-H.case("bootstrap failures are visible and startup is not silently retried", function()
+H.case("configuration failures are visible and startup is not silently retried", function()
   local m = Tools.new({
     specs = {
       {
         id = "broken",
         dir = H.root,
-        bootstrap = function()
-          error("bootstrap boom")
+        config = function()
+          error("configuration boom")
         end,
       },
     },
   })
   H.raises(function()
     m:start()
-  end, "bootstrap boom")
+  end, "configuration boom")
   H.eq(m:explain("broken").state.phase, "failed")
   H.raises(function()
     m:start()

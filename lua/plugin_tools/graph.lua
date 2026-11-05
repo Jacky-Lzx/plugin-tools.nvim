@@ -14,11 +14,10 @@ local fields = {
   start = true,
   main = true,
   opts = true,
-  bootstrap = true,
   config = true,
   build = true,
 }
-local scalars = { "source", "dir", "dev", "version", "path", "start", "main", "bootstrap", "config", "build" }
+local scalars = { "source", "dir", "dev", "version", "path", "start", "main", "config", "build" }
 
 local function valid_id(id)
   return type(id) == "string" and id:match("^[%w][%w_.-]*$") and id ~= "." and id ~= ".."
@@ -111,7 +110,6 @@ function M.resolve(specs, opts)
     for _, key in ipairs({ "dev", "start" }) do
       U.check(n[key] == nil or type(n[key]) == "boolean", id .. ": " .. key .. " must be boolean")
     end
-    U.check(n.bootstrap == nil or type(n.bootstrap) == "function", id .. ": bootstrap must be a function")
     U.check(n.config == nil or n.config == false or type(n.config) == "function", id .. ": invalid config")
     U.check(
       n.build == nil

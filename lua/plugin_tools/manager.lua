@@ -116,19 +116,6 @@ function Manager:start()
   -- A single option assignment avoids rebuilding Neovim's runtime cache N times.
   U.set_runtime_paths(paths)
   self.started = true
-  for _, id in ipairs(self.graph.order) do
-    local n = self.graph.nodes[id]
-    if self.states[id].phase ~= "missing" and n.bootstrap then
-      local ok, err = xpcall(function()
-        n.bootstrap(self:_context(n))
-      end, debug.traceback)
-      if not ok then
-        self.states[id].phase, self.states[id].error = "failed", err
-        self.start_error = id .. ": bootstrap failed: " .. tostring(err)
-        U.fail(self.start_error)
-      end
-    end
-  end
   for _, id in ipairs(self.graph.activation_order) do
     if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
       local ok, err = pcall(self.activate, self, id)

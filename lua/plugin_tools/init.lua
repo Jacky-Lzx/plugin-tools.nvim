@@ -8,7 +8,6 @@ end
 function M.setup(opts)
   assert(not current, "plugin-tools: setup() may only be called once; use new() for isolated instances")
   local manager = M.new(opts)
-  manager:start()
   current = manager
   if not opts or opts.commands ~= false then
     vim.api.nvim_create_user_command("PluginTools", function(args)
@@ -21,6 +20,7 @@ function M.setup(opts)
       desc = "Manage plugin-tools packages",
     })
   end
+  manager:start()
   return manager
 end
 
