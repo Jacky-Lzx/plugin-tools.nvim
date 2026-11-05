@@ -230,6 +230,8 @@ function Manager:explain(id)
     after = vim.deepcopy(n.after),
     start = n.start,
     opts = vim.deepcopy(n.opts),
+    declarations = vim.deepcopy(n.declarations),
+    option_history = vim.deepcopy(n.option_history),
     state = vim.deepcopy(self.states[id]),
   }
 end

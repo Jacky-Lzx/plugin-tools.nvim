@@ -25,6 +25,12 @@ package; a child without either shares its parent's package owner. path selects
 a component directory relative to that owner. All nodes have a global id.
 Repeated compatible declarations merge options and share installation.
 
+origin optionally labels a declaration's configuration module/file. explain(id)
+returns declarations in merge order and option_history with key paths and
+replace/clear assignments. Labels inherit through children; manifest positions
+are always recorded. Conflicts identify both sources. History stores metadata,
+not extra copies of option values; opts contains the final merged values.
+
 Root nodes default to start=true; children default to start=false. main names
 the module whose setup(opts) runs on activation. config(ctx) replaces setup;
 config=false suppresses setup. enabled=false omits that contribution and its

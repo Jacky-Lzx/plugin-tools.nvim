@@ -129,6 +129,7 @@ Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
 | Field | Meaning |
 | --- | --- |
 | `source` | Git URL, local Git repository path, or `owner/repository` shorthand |
+| `origin` | Optional declaration label, such as a configuration module or project file |
 | `dir` | External checkout, never installed, updated, frozen, or deleted |
 | `dev` | Prefer `dev.path/id`; fall back to `source` unless `dev.fallback = false` |
 | `version` | Branch, tag, commit, or explicit Git ref; no semver solver |
@@ -163,6 +164,16 @@ reference alone does not create or install a package.
 Dependencies impose no setup order and never activate their targets. Only
 `after` adds initialization constraints. Dependency cycles are allowed;
 initialization cycles and recursive activation report the cycle path.
+
+`explain(id)` includes ordered `declarations` with origin labels, manifest positions,
+parent IDs, fields and enabled state. Same-package children inherit the origin of
+their declaring contribution unless they supply one. Scalar conflicts name both
+origins. `option_history` lists assigned key paths in merge order: `replace`
+supersedes the whole subtree at that path, while `clear` records an empty table.
+Later descendant assignments refine an earlier replacement; a later ancestor
+replacement supersedes earlier descendants. Disabled contributions have no option
+assignments. History stores metadata only; final option values remain in `opts`.
+Missing labels use `manifest` plus a position such as `specs[2].children[1]`.
 
 `ctx` contains `id`, `dir`, a private `opts` copy, and `has(id)`, `activate(id)`,
 and `use(id)` closures. Those closures accept only dependencies declared by that

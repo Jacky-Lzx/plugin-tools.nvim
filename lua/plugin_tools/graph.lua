@@ -1,7 +1,9 @@
 local U = require("plugin_tools.util")
+local P = require("plugin_tools.provenance")
 local M = {}
 local fields = {
   id = true,
+  origin = true,
   source = true,
   dir = true,
   dev = true,
@@ -30,10 +32,11 @@ end
 
 function M.resolve(specs, opts)
   opts = opts or {}
-  local nodes, order, disabled = {}, {}, {}
-  local function add(spec, parent)
+  local nodes, order, disabled, declarations = {}, {}, {}, {}
+  local function add(spec, parent, position, inherited_origin)
     U.check(type(spec) == "table" and valid_id(spec.id), "each spec needs a safe, unique id")
     local id = spec.id
+    U.check(spec.origin == nil or (type(spec.origin) == "string" and spec.origin ~= ""), id .. ": invalid origin")
     for key in pairs(spec) do
       U.check(fields[key], id .. ": unknown field " .. tostring(key))
     end
@@ -42,13 +45,41 @@ function M.resolve(specs, opts)
       enabled = enabled()
     end
     U.check(enabled == nil or type(enabled) == "boolean", id .. ": enabled must be boolean or a predicate")
+    local contributions = declarations[id] or {}
+    declarations[id] = contributions
+    local declaration = {
+      origin = spec.origin or inherited_origin or "manifest",
+      position = position,
+      index = #contributions + 1,
+      parent = parent and parent.id,
+      enabled = enabled ~= false,
+      fields = {},
+    }
+    for key in pairs(spec) do
+      if key ~= "id" and key ~= "origin" and key ~= "children" then
+        declaration.fields[#declaration.fields + 1] = key
+      end
+    end
+    table.sort(declaration.fields)
+    contributions[#contributions + 1] = declaration
     if enabled == false then
       disabled[id] = true
       return
     end
     local n = nodes[id]
     if not n then
-      n = { id = id, opts = {}, dependencies = {}, after = {}, after_set = {}, parents = {}, roots = false }
+      n = {
+        id = id,
+        opts = {},
+        dependencies = {},
+        after = {},
+        after_set = {},
+        parents = {},
+        roots = false,
+        declarations = contributions,
+        option_history = {},
+        field_origins = {},
+      }
       nodes[id], order[#order + 1] = n, id
     end
     if parent then
@@ -57,17 +88,36 @@ function M.resolve(specs, opts)
       n.roots = true
     end
     local owner = (spec.source or spec.dir) and id or (parent and parent.owner or id)
-    U.check(not n.owner or n.owner == owner, id .. ": conflicting package ownership")
+    U.check(
+      not n.owner or n.owner == owner,
+      id
+        .. ": conflicting package ownership between "
+        .. (n.owner_origin or P.label(declaration))
+        .. " and "
+        .. P.label(declaration)
+    )
     n.owner = owner
+    n.owner_origin = n.owner_origin or P.label(declaration)
     for _, key in ipairs(scalars) do
       local value = spec[key]
       if value ~= nil then
-        U.check(n[key] == nil or vim.deep_equal(n[key], value), id .. ": conflicting " .. key)
+        U.check(
+          n[key] == nil or vim.deep_equal(n[key], value),
+          id
+            .. ": conflicting "
+            .. key
+            .. " between "
+            .. (n.field_origins[key] or P.label(declaration))
+            .. " and "
+            .. P.label(declaration)
+        )
         n[key] = value
+        n.field_origins[key] = n.field_origins[key] or P.label(declaration)
       end
     end
     U.check(spec.opts == nil or type(spec.opts) == "table", id .. ": opts must be a table")
     if spec.opts then
+      P.options(n.option_history, n.opts, spec.opts, declaration)
       U.merge_into(n.opts, spec.opts)
     end
     for _, dep in ipairs(list(spec.dependencies or {}, id .. ".dependencies")) do
@@ -93,12 +143,12 @@ function M.resolve(specs, opts)
         n.after_set[target] = true
       end
     end
-    for _, child in ipairs(list(spec.children or {}, id .. ".children")) do
-      add(child, n)
+    for index, child in ipairs(list(spec.children or {}, id .. ".children")) do
+      add(child, n, position .. ".children[" .. index .. "]", declaration.origin)
     end
   end
-  for _, spec in ipairs(list(specs, "specs")) do
-    add(spec)
+  for index, spec in ipairs(list(specs, "specs")) do
+    add(spec, nil, "specs[" .. index .. "]")
   end
 
   local packages, package_order = {}, {}
