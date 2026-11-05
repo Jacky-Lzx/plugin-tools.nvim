@@ -1,0 +1,80 @@
+*plugin-tools.txt*  Explicit plugin composition and package management
+
+plugin-tools.nvim requires Neovim 0.11+; Git is needed for package operations.
+
+SETUP                                                     *plugin-tools-setup*
+>
+  vim.opt.rtp:prepend('/path/to/plugin-tools.nvim')
+  require('plugin_tools').setup({
+    specs = {
+      { id = 'my-plugin', dir = '/path/to/my-plugin', main = 'my_plugin' },
+    },
+  })
+<
+Call setup during init.lua, before native plugin loading. Installation is
+explicit; startup never downloads packages. Use new(options) for an independent
+manager, run install():wait(), and restart before normal startup. Alternatively,
+strict=false permits startup with missing directories to run installation.
+
+COMPOSITION                                         *plugin-tools-composition*
+
+children contains nested declarations. source/dir identifies an independent
+package; a child without either shares its parent's package owner. path selects
+a component directory relative to that owner. All nodes have a global id.
+Repeated compatible declarations merge options and share installation.
+
+Root nodes default to start=true; children default to start=false. main names
+the module whose setup(opts) runs on activation. config(ctx) replaces setup;
+config=false suppresses setup. bootstrap(ctx) is an optional lightweight startup
+callback. enabled=false omits that contribution and its subtree.
+
+dependencies contains IDs or {id='other', optional=true}. It guarantees declared
+availability, without initialization or activation ordering. after explicitly
+requires initialization of other nodes first. Optional references may be absent.
+
+ctx provides id, dir, opts and dependency-only has(id), activate(id), use(id)
+closures. use initializes the target once and returns require(main). The plugin
+decides when to call it. Context functions use dot calls; managers use colon calls.
+
+start=false does not suppress native plugin/ scripts. Expensive work must be
+deferred by the plugin itself. The manager does not intercept require(), install
+loading triggers, replay runtime scripts, or unload initialized modules.
+
+COMMANDS                                                 *:PluginTools*
+
+:PluginTools [status]          Show each plugin's state and directory.
+:PluginTools explain {id}      Explain ownership, users, configuration and state.
+:PluginTools install [ids...]  Install missing packages, honoring the lockfile.
+:PluginTools update [ids...]   Update selected packages and lock revisions.
+:PluginTools restore [ids...]  Restore selected packages to locked commits.
+:PluginTools freeze [ids...]   Record selected current checkout revisions.
+:PluginTools clean             Preview unreferenced owned checkouts.
+:PluginTools clean --apply     Remove those checkouts and lock entries.
+
+Git operations are asynchronous. Updates stage all builds before publication;
+caught errors roll back replaced checkouts. Dirty or unowned checkouts are
+protected. Local dir/dev checkouts are never updated or cleaned. Restart after
+changing package files. See README.md for transaction and crash recovery limits.
+
+API                                                        *plugin-tools-api*
+>
+  local m = require('plugin_tools').new(options)
+  m:start()
+  m:activate(id)
+  local module = m:use(id)
+  local available = m:has(id)
+  local status = m:status()
+  local explanation = m:explain(id)
+  local task = m:install({ids = {'my-plugin'}})
+  local result, err = task:wait(300000)
+<
+install, update, restore, freeze and clean return tasks. wait pumps the event
+loop; its timeout does not cancel the task. An on_complete(result, err) option
+receives completion without waiting.
+
+Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
+strict=true, commands=true, concurrency=4, git_timeout=120000, profile=false.
+Operation options: ids, concurrency, timeout, on_complete; clean accepts dry_run
+(default true) and operates on the whole manifest. Check :checkhealth plugin_tools.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
