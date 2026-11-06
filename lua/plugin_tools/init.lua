@@ -10,7 +10,7 @@ function M.setup(opts)
   local manager = M.new(opts)
   current = manager
   if not opts or opts.commands ~= false then
-    vim.api.nvim_create_user_command("PluginTools", function(args)
+    require("plugin_tools.user_command").create("PluginTools", function(args)
       require("plugin_tools.command").run(current, args.fargs)
     end, {
       nargs = "*",
