@@ -206,4 +206,73 @@ H.case("startup profile sorts timings, keeps focus and adapts to narrow windows"
   )
   press("q")
 end)
+H.case("declared children form a tree while profiles keep parents and independent sorting", function()
+  local child_dir = H.root .. "/independent"
+  vim.fn.mkdir(child_dir, "p")
+  local m = Tools.new({
+    specs = {
+      {
+        id = "parent-a",
+        dir = H.root,
+        children = {
+          { id = "independent", dir = child_dir },
+          { id = "component" },
+        },
+      },
+      { id = "parent-b", dir = H.root, children = { { id = "independent", dir = child_dir } } },
+      { id = "dependent", dir = H.root, dependencies = { "parent-a" } },
+    },
+  }):start()
+  m.states.independent.startup_ms = 90
+  local panel = m:open()
+  local function lines()
+    return vim.api.nvim_buf_get_lines(panel.buf, 0, -1, false)
+  end
+  assert(panel.by_id["parent-a"] < panel.by_id.independent)
+  assert(panel.by_id.independent < panel.by_id.component)
+  assert(panel.by_id.component < panel.by_id["parent-b"])
+  H.eq(vim.tbl_count(panel.by_id), 5)
+  assert(lines()[panel.by_id.independent]:find("├─ independent", 1, true))
+  assert(lines()[panel.by_id.component]:find("└─ component", 1, true))
+  assert(not lines()[panel.by_id.dependent]:find("─", 1, true))
+  vim.api.nvim_win_set_cursor(panel.win, { panel.by_id.independent, 0 })
+  press(" ")
+  press("<CR>")
+  assert(table.concat(lines(), "\n"):find("parent-a, parent-b", 1, true))
+  local snapshot = m:status()
+  H.eq(snapshot[2].parents, { "parent-a", "parent-b" })
+  snapshot[2].parents[1] = "changed"
+  assert(m.graph.nodes.independent.parents["parent-a"])
+  press("P")
+  H.eq(panel:current(), "independent")
+  H.eq(panel.owners[panel.by_id.independent + 1], "independent")
+  assert(lines()[panel.by_id.independent + 1]:find("↳ parent-a, parent-b", 1, true))
+  vim.api.nvim_win_set_cursor(panel.win, { panel.by_id.independent + 1, 0 })
+  press(" ")
+  H.eq(panel.selected.independent, nil)
+  panel.filter = "independent"
+  panel:render()
+  H.eq(vim.tbl_count(panel.by_id), 1)
+  press("P")
+  H.eq(vim.tbl_count(panel.by_id), 3)
+  assert(panel.by_id["parent-a"] and panel.by_id["parent-b"])
+  assert(lines()[panel.by_id.independent]:find("└─ independent", 1, true))
+  for _, mode in ipairs({ "status", "profile" }) do
+    panel.mode = mode
+    for _, size in ipairs({ 132, 88, 60, 38 }) do
+      vim.api.nvim_win_set_width(panel.win, size)
+      panel:render()
+      for _, line in ipairs(lines()) do
+        assert(vim.fn.strdisplaywidth(line) <= size - 2, "Hierarchy overflow: " .. line)
+      end
+    end
+  end
+  press("q")
+  local layout = require("plugin_tools.ui.tree").layout({
+    { id = "a", dir = "/a", parents = { "b" } },
+    { id = "b", dir = "/b", parents = { "a" } },
+  }, "", false)
+  H.eq(#layout, 2)
+  assert(layout[1].item.id ~= layout[2].item.id)
+end)
 H.finish()

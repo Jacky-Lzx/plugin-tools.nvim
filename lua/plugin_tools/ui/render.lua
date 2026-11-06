@@ -1,4 +1,5 @@
 local Style = require("plugin_tools.ui.style")
+local Tree = require("plugin_tools.ui.tree")
 local M = {}
 local width = vim.fn.strdisplaywidth
 
@@ -160,6 +161,9 @@ local function details(b, view, item, progress)
     b:detail("Package", info.package)
   end
   b:detail("Source", info.source or "Local checkout")
+  if #info.parents > 0 then
+    b:detail("Parents", table.concat(info.parents, ", "))
+  end
   b:detail("Dependencies", dependencies(info.dependencies))
   b:detail("Referenced by", #info.referenced_by > 0 and table.concat(info.referenced_by, ", ") or "None")
   if #info.after > 0 then
@@ -223,21 +227,19 @@ local function columns(inner, maximum, with_operation)
 end
 
 local function plugins(b, view, items, task)
-  local maximum, visible = 0, {}
-  for _, item in ipairs(items) do
-    if (item.id .. " " .. item.dir):lower():find(view.filter:lower(), 1, true) then
-      visible[#visible + 1] = item
-      maximum = math.max(maximum, width(item.id))
-    end
-  end
   local profiling = view.mode == "profile"
+  local rows = Tree.layout(items, view.filter, profiling)
+  local maximum = 0
+  for _, row in ipairs(rows) do
+    maximum = math.max(maximum, width(row.item.id) + width(row.branch))
+  end
   if profiling then
-    table.sort(visible, function(a, other)
-      local left, right = a.state.startup_ms or -1, other.state.startup_ms or -1
+    table.sort(rows, function(a, other)
+      local left, right = a.item.state.startup_ms or -1, other.item.state.startup_ms or -1
       if view.sort ~= "name" and left ~= right then
         return left > right
       end
-      return a.id < other.id
+      return a.item.id < other.item.id
     end)
   end
   local c
@@ -267,13 +269,12 @@ local function plugins(b, view, items, task)
     end
   end
   b:line(header)
-  for _, item in ipairs(visible) do
+  for _, entry in ipairs(rows) do
+    local item = entry.item
     local progress = task and task.items[item.package]
     local selected = view.selected[item.id]
     local prefix = (selected and "●" or "○") .. " " .. (view.expanded[item.id] and "▾" or "▸") .. " "
-    if item.id ~= item.package then
-      prefix = prefix .. "  "
-    end
+    prefix = prefix .. entry.branch
     local state = not c.operation and task and not task.done and progress and progress.phase or item.state.phase
     local parts = {
       { M.fit(prefix, c.name), selected and "PluginToolsSelected" or "PluginToolsMuted" },
@@ -319,6 +320,9 @@ local function plugins(b, view, items, task)
     if selected then
       b.selected[#b.selected + 1] = row - 1
     end
+    if profiling and #(item.parents or {}) > 0 then
+      b:wrap("↳ " .. table.concat(item.parents, ", "), "    ", "PluginToolsMuted")
+    end
     if progress and task.action == "plan" and progress.after_commit then
       b:wrap(
         ("%s → %s  ·  build: %s"):format(
@@ -337,7 +341,7 @@ local function plugins(b, view, items, task)
       b.owners[owned] = item.id
     end
   end
-  if #visible == 0 then
+  if #rows == 0 then
     b:line()
     b:line({ { "No plugins match this filter.", "PluginToolsMuted" } })
     b:line({ { "/ ", "PluginToolsKey" }, { "Change or clear the filter to see plugins.", "PluginToolsMuted" } })

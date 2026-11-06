@@ -348,6 +348,12 @@ Open `:PluginTools profile`, or press `P` in the panel. `t` switches between
 slowest startup first and alphabetical order; filtering, selection, details and
 package actions work in both plugin views. Wide status panels also show STARTUP.
 
+The plugin list shows `children` as a tree, including independently installed
+child packages. Filtering keeps matching nodes and their ancestors visible.
+Shared children appear once; details list every declared parent. The profile
+stays flat for time/name sorting and annotates children with `↳ parent` rows.
+Ordinary dependencies do not create tree nesting. Enter still toggles details.
+
 The profile separates declaration resolution, runtimepath mounting, plugin
 initialization, native sourced scripts, and other startup work. Its total adds
 resolution time to the interval from `start()` through the beginning of

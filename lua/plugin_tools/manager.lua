@@ -215,8 +215,17 @@ function Manager:status()
   local out = {}
   for _, id in ipairs(self.graph.order) do
     local n = self.graph.nodes[id]
-    out[#out + 1] =
-      { id = id, package = n.owner, dir = n.dir, managed = n.package.managed, state = vim.deepcopy(self.states[id]) }
+    local parents = vim.tbl_keys(n.parents)
+    table.sort(parents)
+    out[#out + 1] = {
+      id = id,
+      package = n.owner,
+      dir = n.dir,
+      managed = n.package.managed,
+      parents = parents,
+      root = n.roots,
+      state = vim.deepcopy(self.states[id]),
+    }
   end
   return out
 end
