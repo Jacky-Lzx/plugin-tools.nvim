@@ -467,3 +467,14 @@ Commands belong to the plugin; choose global entry keys and short aliases in
 your configuration. Registration reports same-name conflicts without replacing
 user commands. Reconfiguration refreshes only commands still owned by this
 plugin, and cleanup preserves subsequent user replacements.
+
+## Setup contract
+
+`setup(nil)` creates the singleton with defaults. Configuration must be a table; caller-owned tables
+are copied before use. Invalid configuration types do not replace live handlers
+or commands. Calling setup again is rejected; manager `start()` is idempotent.
+The singleton manager accepts setup once; use `new(opts)` for another isolated manager.
+
+A manager owns a fixed plugin graph. Loading native plugin scripts is not
+reversible, so there is no generic unload/dispose API. Runtime feature teardown
+belongs to each feature plugin; use `new(opts)` for an isolated manager graph.

@@ -6,6 +6,8 @@ function M.new(opts)
 end
 
 function M.setup(opts)
+  assert(opts == nil or type(opts) == "table", "plugin-tools.nvim: setup expects a table")
+  opts = vim.deepcopy(opts or {})
   assert(not current, "plugin-tools: setup() may only be called once; use new() for isolated instances")
   local manager = M.new(opts)
   current = manager
