@@ -13,6 +13,7 @@ local fields = {
   dependencies = true,
   after = true,
   enabled = true,
+  optional = true,
   start = true,
   main = true,
   opts = true,
@@ -32,19 +33,62 @@ end
 
 function M.resolve(specs, opts)
   opts = opts or {}
-  local nodes, order, disabled, declarations = {}, {}, {}, {}
-  local function add(spec, parent, position, inherited_origin)
+  local nodes, order, disabled, declarations, unselected = {}, {}, {}, {}, {}
+  local selected, waiting, pending, inputs = {}, {}, {}, {}
+  local function enqueue(item)
+    item.selected = true
+    pending[#pending + 1] = item
+  end
+  local function prepare(spec)
     U.check(type(spec) == "table" and valid_id(spec.id), "each spec needs a safe, unique id")
     local id = spec.id
     U.check(spec.origin == nil or (type(spec.origin) == "string" and spec.origin ~= ""), id .. ": invalid origin")
     for key in pairs(spec) do
       U.check(fields[key], id .. ": unknown field " .. tostring(key))
     end
+    U.check(spec.optional == nil or type(spec.optional) == "boolean", id .. ": optional must be boolean")
     local enabled = spec.enabled
     if type(enabled) == "function" then
       enabled = enabled()
     end
     U.check(enabled == nil or type(enabled) == "boolean", id .. ": enabled must be boolean or a predicate")
+    local item = { spec = spec, enabled = enabled ~= false }
+    if item.enabled then
+      if spec.optional ~= true then
+        if not selected[id] then
+          selected[id] = true
+          for _, candidate in ipairs(waiting[id] or {}) do
+            enqueue(candidate)
+          end
+          waiting[id] = nil
+        end
+        enqueue(item)
+      elseif selected[id] then
+        enqueue(item)
+      else
+        waiting[id] = waiting[id] or {}
+        waiting[id][#waiting[id] + 1] = item
+      end
+    end
+    return item
+  end
+  for _, spec in ipairs(list(specs, "specs")) do
+    inputs[#inputs + 1] = prepare(spec)
+  end
+  -- Expand only selected subtrees. Waiting declarations are released by an
+  -- explicit non-optional declaration, never by dependency references.
+  local cursor = 1
+  while pending[cursor] do
+    local item = pending[cursor]
+    item.children = {}
+    for _, child in ipairs(list(item.spec.children or {}, item.spec.id .. ".children")) do
+      item.children[#item.children + 1] = prepare(child)
+    end
+    cursor = cursor + 1
+  end
+  local function add(item, parent, position, inherited_origin)
+    local spec, enabled = item.spec, item.enabled
+    local id = spec.id
     local contributions = declarations[id] or {}
     declarations[id] = contributions
     local declaration = {
@@ -52,7 +96,8 @@ function M.resolve(specs, opts)
       position = position,
       index = #contributions + 1,
       parent = parent and parent.id,
-      enabled = enabled ~= false,
+      enabled = enabled,
+      optional = spec.optional == true,
       fields = {},
     }
     for key in pairs(spec) do
@@ -62,8 +107,12 @@ function M.resolve(specs, opts)
     end
     table.sort(declaration.fields)
     contributions[#contributions + 1] = declaration
-    if enabled == false then
+    if not enabled then
       disabled[id] = true
+      return
+    end
+    if not item.selected then
+      unselected[id] = true
       return
     end
     local n = nodes[id]
@@ -143,12 +192,12 @@ function M.resolve(specs, opts)
         n.after_set[target] = true
       end
     end
-    for index, child in ipairs(list(spec.children or {}, id .. ".children")) do
+    for index, child in ipairs(item.children) do
       add(child, n, position .. ".children[" .. index .. "]", declaration.origin)
     end
   end
-  for index, spec in ipairs(list(specs, "specs")) do
-    add(spec, nil, "specs[" .. index .. "]")
+  for index, item in ipairs(inputs) do
+    add(item, nil, "specs[" .. index .. "]")
   end
 
   local packages, package_order = {}, {}
@@ -218,7 +267,14 @@ function M.resolve(specs, opts)
     for dep, optional in pairs(n.dependencies) do
       U.check(
         optional or nodes[dep],
-        id .. ": required dependency " .. dep .. (disabled[dep] and " is disabled" or " is undeclared")
+        id
+          .. ": required dependency "
+          .. dep
+          .. (
+            disabled[dep] and " is disabled"
+            or unselected[dep] and " is optional and not selected"
+            or " is undeclared"
+          )
       )
     end
   end

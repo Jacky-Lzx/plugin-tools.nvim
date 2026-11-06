@@ -138,6 +138,7 @@ Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
 | `dependencies` | IDs, or `{ id = "...", optional = true }` references |
 | `after` | IDs that must initialize before this node; activates them when necessary |
 | `enabled` | Boolean or zero-argument predicate; false omits this contribution and its subtree |
+| `optional` | Keep defaults dormant until another enabled, non-optional declaration selects the same ID |
 | `start` | Initialize during startup; defaults true for roots, false for children |
 | `main` | Module passed to `require()` on activation; default activation calls its `setup(opts)` |
 | `opts` | Configuration table, copied before passing to plugin code |
@@ -156,7 +157,34 @@ with required references taking precedence over optional references. Children do
 not inherit the parent's arbitrary options. A disabled declaration does not veto
 another enabled declaration of the same shared plugin.
 
-All enabled declarations participate in installation. Dependencies are validated
+To enable a plugin only in selected projects, keep its complete declaration optional:
+
+```lua
+{ id = "notes", source = "author/notes", optional = true, opts = { border = "rounded" } }
+```
+
+Have the host configuration securely read a project manifest and append its native
+declarations before calling `setup()`. The project can select the plugin by ID:
+
+```lua
+return { { id = "notes", opts = { border = "single" } } }
+```
+
+Without an enabled, non-optional declaration of `notes`, its optional defaults and
+subtree contribute no packages, directory checks, runtime paths, setup calls, or
+installation tasks. Dependencies and `after` references do not select optional
+plugins. A dormant subtree cannot select itself through its children. Once
+selected, all enabled contributions merge in their original declaration order;
+default source, configuration and options remain available. Predicates are evaluated
+once for each reachable declaration. `enabled = false` still discards that
+contribution; it is not a defaults registry. An optional declaration's `optional`
+flag is independent of optional dependency references.
+
+The manager does not discover or execute project files. Selection happens before
+startup mounting; changing projects in an existing session does not unload plugins.
+`start = false` continues to mean mounted but not configured, rather than dormant.
+
+All selected, enabled declarations participate in installation. Dependencies are validated
 references, not a discovery or version resolution system. Required references
 must be declared and enabled; optional references may be absent. An optional
 reference alone does not create or install a package.
