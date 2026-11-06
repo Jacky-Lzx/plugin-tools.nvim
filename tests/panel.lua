@@ -153,4 +153,57 @@ H.case("floating layout adapts to Unicode paths, themes and narrow windows", fun
   H.eq(vim.api.nvim_buf_is_valid(panel.buf), false)
   H.eq(pcall(vim.api.nvim_get_autocmds, { group = group }), false)
 end)
+
+H.case("startup profile sorts timings, keeps focus and adapts to narrow windows", function()
+  local m = Tools.new({
+    specs = {
+      { id = "alpha", dir = H.root },
+      { id = "slow", dir = H.root },
+      { id = "uninitialized", dir = H.root, start = false },
+    },
+  }):start()
+  m.states.alpha.startup_ms, m.states.slow.startup_ms = 1, 42
+  m.states.slow.startup_config_ms, m.states.slow.scripts_ms = 30, 12
+  m.states.slow.deferred_ms = 2
+  m.states.slow.scripts = { { file = H.root .. "/plugin/slow.lua", self_ms = 12, duration_ms = 12 } }
+  local panel = m:open()
+  press("P")
+  H.eq(panel.mode, "profile")
+  H.eq(panel:current(), "slow")
+  press(" ")
+  local function contents()
+    return table.concat(vim.api.nvim_buf_get_lines(panel.buf, 0, -1, false), "\n")
+  end
+  assert(contents():find("Startup stages", 1, true))
+  assert(contents():find("42.000 ms", 1, true))
+  assert(contents():find("slowest startup first", 1, true))
+  press("t")
+  assert(panel.by_id.alpha < panel.by_id.slow)
+  H.eq(panel:current(), "slow")
+  assert(panel.selected.slow)
+  press("<CR>")
+  assert(contents():find("plugin/slow.lua", 1, true))
+  for _, size in ipairs({ 132, 88, 60, 38 }) do
+    vim.api.nvim_win_set_width(panel.win, size)
+    panel:render()
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(panel.buf, 0, -1, false)) do
+      assert(vim.fn.strdisplaywidth(line) <= size - 2, "Profile overflow: " .. line)
+    end
+    assert(contents():find("42.000 ms", 1, true))
+    H.eq(panel:current(), "slow")
+  end
+  press("?")
+  press("?")
+  H.eq(panel.mode, "profile")
+  H.eq(panel:current(), "slow")
+  press("P")
+  H.eq(panel.mode, "status")
+  press("q")
+  local disabled = Tools.new({ profile = false }):start():open()
+  press("P")
+  assert(
+    table.concat(vim.api.nvim_buf_get_lines(disabled.buf, 0, -1, false), "\n"):find("Profiling is disabled", 1, true)
+  )
+  press("q")
+end)
 H.finish()

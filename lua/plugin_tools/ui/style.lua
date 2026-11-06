@@ -15,6 +15,7 @@ local links = {
   Ready = "DiagnosticOk",
   Pending = "Comment",
   Active = "DiagnosticInfo",
+  Timing = "Number",
   Warning = "DiagnosticWarn",
   Error = "DiagnosticError",
 }

@@ -53,6 +53,7 @@ loading triggers, replay runtime scripts, or unload initialized modules.
 COMMANDS                                                 *:PluginTools*
 
 :PluginTools [status]          Show each plugin's state and directory.
+:PluginTools profile           Show startup stages and plugin timing.
 :PluginTools log               Show the latest operation's process/phase log.
 :PluginTools explain {id}      Explain ownership, users, configuration and state.
 :PluginTools install [ids...]  Install missing packages, honoring the lockfile.
@@ -69,7 +70,7 @@ COMMANDS                                                 *:PluginTools*
 The centered rounded panel adapts columns to the window and follows the current
 colorscheme. j/k move between plugins, / filters, Space selects, Enter shows
 compact details, o expands full configuration, ? shows help, and l toggles logs.
-r refreshes and q/Escape closes. u/i/s/f operate on selected nodes or the cursor node;
+P opens startup profiling; t sorts by time/name. r refreshes and q/Escape closes. u/i/s/f operate on selected nodes or the cursor node;
 c previews cleanup and C applies it. Closing detaches progress observers. The
 panel is loaded only on demand. manager:open() also opens it.
 Selection and cursor survive resize/view changes. PluginToolsReady/Active/Warning/
@@ -114,7 +115,31 @@ checkouts, mismatched ownership, unsafe paths and changed lockfiles. Interrupted
 recovery claims and legacy locks need manual inspection; see README.md.
 
 Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
-strict=true, commands=true, concurrency=4, git_timeout=120000, profile=false.
+strict=true, commands=true, concurrency=4, git_timeout=120000, profile=true.
+
+PROFILING                                                *plugin-tools-profile*
+
+Lightweight timing is on by default; profile=false disables collection.
+P or :PluginTools profile shows stages and plugins, slowest startup first.
+t toggles time/name sorting. STARTUP is exclusive configuration plus attributed
+native source time; INIT and SCRIPTS separate those costs. LATER is managed
+activation after startup. Enter shows inclusive/exclusive timings and script
+files. Shared roots are charged once, to their package.
+
+Stages cover resolution, runtimepath mounting, initialization, emitted native
+SourcePre/SourcePost spans and other work. Total is resolve time plus start()
+through the beginning of VimEnter, excluding earlier init/spec construction
+and any gap between new() and start(). It is not whole-process startup time.
+After VimEnter, setup reports manager startup only. Source observers are removed
+at VimEnter or startup failure; startup totals then remain fixed.
+
+Some sources inside non-nested autocommands emit no source events; those and
+other unmeasured startup work appear under Other startup work. No require()
+wrappers are installed. Plugin-internal first-use work is not measured unless
+it runs inside a managed activation. Interrupted source samples are omitted.
+manager:profile() returns copied {timings, plugins}. states retain duration_ms
+(inclusive activation), self_ms, startup_config_ms, scripts_ms, startup_ms,
+deferred_ms and source samples where measured.
 Operation options: ids, concurrency, timeout, on_complete; clean accepts dry_run
 (default true) and operates on the whole manifest. Check :checkhealth plugin_tools.
 

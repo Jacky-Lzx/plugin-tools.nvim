@@ -49,8 +49,14 @@ timer:start(20,20,vim.schedule_wrap(function()
   _G.details=true
   press_stage('log')
  elseif _G.details and text:find('Operation log',1,true) and text:find('PTY_BUILD',1,true) and not _G.log_checked then
-  _G.log_checked=true;press_stage('help')
- elseif _G.log_checked and view.mode=='help' and not _G.help_checked then
+  _G.log_checked=true;press_stage('profile')
+ elseif _G.log_checked and view.mode=='profile' and not _G.profile_checked then
+  assert(m.timings.complete and m.timings.boundary=='VimEnter')
+  assert(text:find('Startup stages',1,true))
+  _G.profile_checked=true;press_stage('sort')
+ elseif _G.profile_checked and view.sort=='name' and not _G.sort_checked then
+  _G.sort_checked=true;press_stage('help')
+ elseif _G.sort_checked and view.mode=='help' and not _G.help_checked then
   _G.help_checked=true;press_stage('narrow')
  elseif _G.help_checked and vim.o.columns==62 and not _G.narrow_checked then
   assert(vim.api.nvim_win_get_width(view.win)<=58)
@@ -61,7 +67,7 @@ timer:start(20,20,vim.schedule_wrap(function()
   _G.narrow_checked=true;press_stage('wide')
  elseif _G.narrow_checked and vim.o.columns==120 and not _G.wide_checked then
   _G.wide_checked=true;press_stage('return')
- elseif _G.wide_checked and view.mode=='log' then
+ elseif _G.wide_checked and view.mode=='profile' then
   timer:stop();timer:close()
   press_stage('close')
   vim.defer_fn(function()
@@ -81,7 +87,7 @@ end))
     process = subprocess.Popen(["nvim", "-u", str(init), "-i", "NONE"], cwd=repo,
                                env=env, stdin=slave, stdout=slave, stderr=slave)
     os.close(slave)
-    actions = {"install": b" i", "details": b"\r", "log": b"l", "help": b"?",
+    actions = {"install": b" i", "details": b"\r", "log": b"l", "profile": b"P", "sort": b"t", "help": b"?",
                "narrow": None, "wide": None, "return": b"?", "close": b"q"}
     handled = set()
     output = bytearray()
@@ -105,7 +111,7 @@ end))
                     os.write(master, actions[name])
         process.wait(timeout=2)
         assert process.returncode == 0 and handled == set(actions), output.decode(errors="replace")[-5000:]
-        print("PASS panel PTY: select, progress, details, logs, help, SIGWINCH resize, close and unsaved source")
+        print("PASS panel PTY: select, progress, details, logs, startup profile, sort, help, SIGWINCH resize, close and unsaved source")
     finally:
         if process.poll() is None:
             process.kill()

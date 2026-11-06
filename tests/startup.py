@@ -47,6 +47,7 @@ local function snapshot(path)
     heavy = package.loaded.terminal_heavy ~= nil,
     setup = _G.backend_setup or 0, answer = _G.answer or 0,
     ft = vim.bo.filetype, ftplugin = vim.b.ptspec_loaded == true,
+    profile = require('plugin_tools').profile(),
     errors = vim.v.errmsg,
   }})}}, path)
 end
@@ -91,15 +92,35 @@ end}})
 
     try:
         before = wait_file(cold)
+        initial_profile = before.pop("profile")
+        timing = initial_profile["timings"]
+        assert timing["enabled"] and timing["complete"] and timing["boundary"] == "VimEnter", timing
+        assert timing["total_ms"] >= timing["manager_ms"] > 0, timing
+        states = {item["id"]: item["state"] for item in initial_profile["plugins"]}
+        assert states["front"]["startup_config_ms"] > 0
+        files = [item["file"] for item in states["front"].get("scripts", [])]
+        assert files, initial_profile
+        assert any("/plugin/entry.lua" in file and "/after/" not in file for file in files), files
+        assert any("/after/plugin/entry.lua" in file for file in files), files
+        assert any("/ftdetect/example.lua" in file for file in files), files
+        assert "startup_ms" not in states["backend"], states["backend"]
         assert before == dict(native=1, after=1, backend=False, heavy=False, setup=0,
                               answer=0, ft="ptspec", ftplugin=True, errors=""), before
         os.write(master, b":PluginToolsTestUse\r")
         after = wait_file(warm)
+        activated_profile = after.pop("profile")
+        assert activated_profile["timings"] == timing, activated_profile
+        backend = next(item["state"] for item in activated_profile["plugins"] if item["id"] == "backend")
+        assert backend["activation"] == "on demand" and backend["deferred_ms"] > 0, backend
+        assert "startup_ms" not in backend, backend
         assert after == dict(native=1, after=1, backend=True, heavy=True, setup=1,
                              answer=42, ft="ptspec", ftplugin=True, errors=""), after
         warm.unlink()
         os.write(master, b":PluginToolsTestUse\r")
-        assert wait_file(warm)["setup"] == 1
+        repeated = wait_file(warm)
+        assert repeated["setup"] == 1
+        repeated_backend = next(item["state"] for item in repeated["profile"]["plugins"] if item["id"] == "backend")
+        assert repeated_backend == backend, repeated_backend
         os.write(master, b":qa!\r")
         deadline = time.monotonic() + 5
         while process.poll() is None and time.monotonic() < deadline:
@@ -111,7 +132,7 @@ end}})
                     break
         process.wait(timeout=5)
         assert process.returncode == 0
-        print("PASS real PTY: native scripts, after scripts, filetypes, cold dependency, first/repeated use")
+        print("PASS real PTY: startup profile, native/after scripts, filetypes, frozen totals, cold dependency, first/repeated use")
     finally:
         if process.poll() is None:
             process.kill()

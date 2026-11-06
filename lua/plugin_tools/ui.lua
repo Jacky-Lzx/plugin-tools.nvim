@@ -21,7 +21,7 @@ local function geometry()
     col = math.max(0, math.floor((vim.o.columns - width - 2) / 2)),
     title = " " .. Render.fit("Plugin Tools", math.max(1, width - 2)) .. " ",
     title_pos = "left",
-    footer = " " .. Render.fit("q Close   l Log   r Refresh   ? Help", math.max(1, width - 2)) .. " ",
+    footer = " " .. Render.fit("q Close   P Profile   l Log   ? Help", math.max(1, width - 2)) .. " ",
     footer_pos = "right",
   }
 end
@@ -83,7 +83,7 @@ function View:render()
       if panel.owners[target + offset] == current then
         target = target + offset
       end
-    elseif self.mode == "status" then
+    elseif self.mode == "status" or self.mode == "profile" then
       for row in pairs(panel.rows) do
         target = math.min(target or row, row)
       end
@@ -110,7 +110,7 @@ function View:render()
 end
 
 function View:move(direction)
-  if self.mode ~= "status" then
+  if self.mode ~= "status" and self.mode ~= "profile" then
     vim.cmd.normal({ args = { direction > 0 and "j" or "k" }, bang = true })
     return
   end
@@ -173,6 +173,13 @@ function View:operate(action, opts)
     return
   end
   self:attach(task)
+end
+
+function M.refresh(manager)
+  local view = views[manager]
+  if view and view:valid() then
+    view:refresh()
+  end
 end
 
 function M.track(manager, task)
@@ -262,6 +269,18 @@ function M.open(manager, opts)
         view:render()
       end
     end, "Full configuration")
+    map("P", function()
+      view.mode = view.mode == "profile" and "status" or "profile"
+      view:render()
+    end, "Startup profile")
+    map("t", function()
+      if view.mode ~= "profile" then
+        view.mode, view.sort = "profile", "time"
+      else
+        view.sort = view.sort == "name" and "time" or "name"
+      end
+      view:render()
+    end, "Sort profile by time or name")
     map("l", function()
       view.mode = view.mode == "log" and "status" or "log"
       view:render()

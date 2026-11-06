@@ -2,7 +2,7 @@ local M = {}
 
 function M.run(manager, args)
   local action = args[1] or "status"
-  if action == "status" or action == "log" then
+  if action == "status" or action == "log" or action == "profile" then
     manager:open({ mode = action })
   elseif action == "explain" then
     assert(args[2], "usage: PluginTools explain {id}")
@@ -55,8 +55,20 @@ function M.complete(manager, lead, line, cursor)
   end
   local choices
   if #words <= 2 then
-    choices =
-      { "status", "log", "explain", "install", "update", "restore", "freeze", "clean", "plan", "apply", "recover" }
+    choices = {
+      "status",
+      "log",
+      "profile",
+      "explain",
+      "install",
+      "update",
+      "restore",
+      "freeze",
+      "clean",
+      "plan",
+      "apply",
+      "recover",
+    }
   elseif words[2] == "clean" or words[2] == "recover" then
     choices = { "--apply" }
   elseif vim.list_contains({ "explain", "install", "update", "restore", "freeze", "plan" }, words[2]) then

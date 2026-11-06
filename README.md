@@ -202,6 +202,7 @@ manager:activate(id)  -- Configure once; explicit after prerequisites are activa
 manager:use(id)       -- Activate and return require(main); main is required
 manager:status()      -- Copies of registered/mounted/ready/missing/failed states
 manager:open()        -- Open the status panel (UI module loads on demand)
+manager:profile()     -- Copied startup stages and per-plugin timing/state snapshot
 manager:explain(id)   -- Package, source, parents, users, dependencies, configuration, state
 ```
 
@@ -239,6 +240,7 @@ on failure. Successful results retain the `packages` ID list and add `details`.
 | `clean()` / `:PluginTools clean` | Preview unreferenced owned packages |
 | `clean({dry_run=false})` / `:PluginTools clean --apply` | Remove those packages and their lock entries |
 | `:PluginTools status` / `:PluginTools explain id` | Inspect state and inclusion reasons |
+| `:PluginTools profile` | View startup phases and per-plugin timings |
 | `:PluginTools log` | View the last operation's phase and process log |
 | `recover()` / `:PluginTools recover` | Preview recovery of an interrupted transaction |
 | `recover({dry_run=false})` / `:PluginTools recover --apply` | Apply validated rollback or finish committed cleanup |
@@ -341,8 +343,34 @@ only when requested. Startup resolves declarations, checks directories, then
 assigns `runtimepath` once. It does not inspect Git status, read the lockfile,
 index Lua modules, check updates, or create timers. Module availability uses
 Neovim's native runtime lookup. Ready activation is a constant-time state check.
-`profile = true` records individual activation times; default timing records only
-resolution and total start duration in `manager.timings`.
+Lightweight profiling is enabled by default (`profile = false` disables it).
+Open `:PluginTools profile`, or press `P` in the panel. `t` switches between
+slowest startup first and alphabetical order; filtering, selection, details and
+package actions work in both plugin views. Wide status panels also show STARTUP.
+
+The profile separates declaration resolution, runtimepath mounting, plugin
+initialization, native sourced scripts, and other startup work. Its total adds
+resolution time to the interval from `start()` through the beginning of
+`VimEnter`; it excludes earlier configuration/spec construction and any idle gap
+between `new()` and `start()`. It is not whole-process Neovim startup time.
+Setup after `VimEnter` measures only the manager's own startup, explicitly labeled.
+
+Plugin STARTUP includes exclusive initialization and attributed source time.
+INIT excludes nested managed activations and timed source calls; details retain
+the inclusive activation duration. SCRIPTS records emitted `SourcePre`/`SourcePost`
+pairs, matching the most specific declared runtime root (including symlink
+aliases); shared roots are attributed once to their package. This includes native
+`plugin/` and `after/plugin/` scripts without replaying them. Script lists appear
+in plugin details. Source events suppressed by non-nested autocommands (including
+some filetype scripts) and work outside these spans fall under Other startup
+work. Profiling itself contributes to measured wall time. There are no `require()` or autocommand wrappers.
+
+Source observers remove themselves at `VimEnter` or startup failure. Startup
+measurements then remain frozen; later managed activation appears under LATER.
+Unmanaged plugin-internal first-use work is not automatically measured. Failed
+initialization retains its elapsed time; interrupted source samples are omitted
+and reported. `manager:profile()` returns copied `{timings, plugins}` data;
+`manager.timings.resolve_ms` and `start_ms` retain their existing meanings.
 
 ```sh
 sh tests/run.sh

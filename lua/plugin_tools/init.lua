@@ -30,6 +30,7 @@ for _, method in ipairs({
   "activate",
   "use",
   "status",
+  "profile",
   "open",
   "explain",
   "install",

@@ -63,7 +63,27 @@ function Manager:start()
   if self.started then
     return self
   end
-  local time = vim.uv.hrtime()
+  self._start_at = vim.uv.hrtime()
+  self.timings.enabled = self.options.profile ~= false
+  self._profile = nil
+  if self.timings.enabled then
+    self._profile = require("plugin_tools.profile").new(self)
+  end
+  local ok, err = pcall(self._start, self)
+  self.timings.start_ms = (vim.uv.hrtime() - self._start_at) / 1e6
+  if not ok and not self.started then
+    self.timings.mount_ms = self.timings.start_ms
+  end
+  if self._profile then
+    self._profile:started(ok)
+  end
+  if not ok then
+    error(err, 0)
+  end
+  return self
+end
+
+function Manager:_start()
   local paths, afters, seen, missing, directories = {}, {}, {}, {}, {}
   for _, id in ipairs(self.graph.order) do
     local n = self.graph.nodes[id]
@@ -132,6 +152,7 @@ function Manager:start()
   insert_afters()
   -- A single option assignment avoids rebuilding Neovim's runtime cache N times.
   U.set_runtime_paths(paths)
+  self.timings.mount_ms = (vim.uv.hrtime() - self._start_at) / 1e6
   self.started = true
   for _, id in ipairs(self.graph.activation_order) do
     if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
@@ -142,8 +163,6 @@ function Manager:start()
       end
     end
   end
-  self.timings.start_ms = (vim.uv.hrtime() - time) / 1e6
-  return self
 end
 
 function Manager:activate(id)
@@ -157,7 +176,7 @@ function Manager:activate(id)
   U.check(state.phase ~= "initializing", "activation cycle: " .. table.concat(self.stack, " -> ") .. " -> " .. id)
   U.check(state.phase ~= "failed", id .. ": previous initialization failed: " .. tostring(state.error))
   state.phase, self.stack[#self.stack + 1] = "initializing", id
-  local time = self.options.profile and vim.uv.hrtime()
+  local frame = self._profile and self._profile:begin("config", id)
   local ok, err = xpcall(function()
     for _, before in ipairs(n.after) do
       self:activate(before)
@@ -174,8 +193,8 @@ function Manager:activate(id)
     end
   end, debug.traceback)
   self.stack[#self.stack] = nil
-  if time then
-    state.duration_ms = (vim.uv.hrtime() - time) / 1e6
+  if frame then
+    self._profile:leave(frame)
   end
   state.phase, state.error = ok and "ready" or "failed", not ok and err or nil
   if not ok then
@@ -200,6 +219,18 @@ function Manager:status()
       { id = id, package = n.owner, dir = n.dir, managed = n.package.managed, state = vim.deepcopy(self.states[id]) }
   end
   return out
+end
+
+function Manager:profile()
+  local timings = vim.deepcopy(self.timings)
+  if timings.enabled and not timings.complete and self._start_at then
+    timings.total_ms = timings.resolve_ms + (vim.uv.hrtime() - self._start_at) / 1e6
+    timings.other_ms = math.max(
+      0,
+      timings.total_ms - timings.resolve_ms - (timings.mount_ms or 0) - timings.config_ms - timings.native_ms
+    )
+  end
+  return { timings = timings, plugins = self:status() }
 end
 
 function Manager:open(opts)

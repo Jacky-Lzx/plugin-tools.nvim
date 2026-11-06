@@ -131,8 +131,30 @@ local function dependencies(map)
   return #names > 0 and table.concat(names, ", ") or "None"
 end
 
+local function milliseconds(value)
+  return value and ("%.3f ms"):format(value) or "—"
+end
+
 local function details(b, view, item, progress)
   local info = view.manager:explain(item.id)
+  local state = item.state
+  if view.manager.timings.enabled then
+    b:detail("Startup", milliseconds(state.startup_ms), "PluginToolsActive")
+    if state.duration_ms then
+      b:detail(
+        "Initialization",
+        milliseconds(state.self_ms) .. " self / " .. milliseconds(state.duration_ms) .. " inclusive"
+      )
+      b:detail("Activated", state.activation)
+    end
+    b:detail("Native scripts", milliseconds(state.scripts_ms))
+    if state.deferred_ms then
+      b:detail("On demand", milliseconds(state.deferred_ms))
+    end
+    for _, script in ipairs(state.scripts or {}) do
+      b:detail("Script", home(script.file) .. "  ·  " .. milliseconds(script.self_ms))
+    end
+  end
   b:detail("Directory", home(info.dir), "PluginToolsPath")
   if info.package ~= info.id then
     b:detail("Package", info.package)
@@ -208,10 +230,37 @@ local function plugins(b, view, items, task)
       maximum = math.max(maximum, width(item.id))
     end
   end
-  local c = columns(b.inner, maximum, task ~= nil and task.total > 0)
-  local header =
-    { { pad("    PLUGIN", c.name), "PluginToolsHeader" }, { "  " }, { pad("STATE", c.state), "PluginToolsHeader" } }
-  for _, key in ipairs({ "source", "operation", "path" }) do
+  local profiling = view.mode == "profile"
+  if profiling then
+    table.sort(visible, function(a, other)
+      local left, right = a.state.startup_ms or -1, other.state.startup_ms or -1
+      if view.sort ~= "name" and left ~= right then
+        return left > right
+      end
+      return a.id < other.id
+    end)
+  end
+  local c
+  if profiling then
+    c = { startup = 10 }
+    local available = b.inner - 12
+    if b.inner >= 76 then
+      c.init, c.scripts = 10, 10
+      available = available - 24
+    end
+    if b.inner >= 52 then
+      c.later = 10
+      available = available - 12
+    end
+    c.name = math.max(1, available)
+  else
+    local timed = view.manager.timings.enabled and b.inner >= 52
+    c = columns(b.inner - (timed and 12 or 0), maximum, task ~= nil and task.total > 0)
+    c.startup = timed and 10 or nil
+  end
+  local header = { { pad("    PLUGIN", c.name), "PluginToolsHeader" } }
+  local column_order = { "state", "startup", "init", "scripts", "later", "source", "operation", "path" }
+  for _, key in ipairs(column_order) do
     if c[key] then
       header[#header + 1] = { "  " }
       header[#header + 1] = { pad(key == "path" and "DIRECTORY" or key:upper(), c[key]), "PluginToolsHeader" }
@@ -229,9 +278,24 @@ local function plugins(b, view, items, task)
     local parts = {
       { M.fit(prefix, c.name), selected and "PluginToolsSelected" or "PluginToolsMuted" },
       { pad(item.id, math.max(0, c.name - width(prefix))), selected and "PluginToolsSelected" or "PluginToolsName" },
-      { "  " },
-      { pad(state, c.state), Style.phase(state) },
     }
+    if c.state then
+      parts[#parts + 1] = { "  " }
+      parts[#parts + 1] = { pad(state, c.state), Style.phase(state) }
+    end
+    for _, column in ipairs({
+      { "startup", "startup_ms" },
+      { "init", "startup_config_ms" },
+      { "scripts", "scripts_ms" },
+      { "later", "deferred_ms" },
+    }) do
+      if c[column[1]] then
+        local value = item.state[column[2]]
+        parts[#parts + 1] = { "  " }
+        parts[#parts + 1] =
+          { pad(milliseconds(value), c[column[1]]), value and "PluginToolsTiming" or "PluginToolsMuted" }
+      end
+    end
     if c.source then
       parts[#parts + 1] = { "  " }
       parts[#parts + 1] = {
@@ -331,6 +395,8 @@ local function help(b)
     {
       "Inspect & maintain",
       {
+        { "P", "Switch plugins / startup profile" },
+        { "t", "Sort profile by startup time / name" },
         { "l", "Switch plugins / operation log" },
         { "r", "Refresh status" },
         { "R", "Preview crash recovery" },
@@ -349,6 +415,54 @@ local function help(b)
   end
 end
 
+local function startup(b, view, t)
+  if not t.enabled then
+    b:wrap(
+      t.enabled == false and "Profiling is disabled. Enable profile = true and restart Neovim to collect timings."
+        or "Startup has not been measured. Start the manager to collect timings.",
+      "",
+      "PluginToolsMuted"
+    )
+    return
+  end
+  local stages = {
+    { "Resolve declarations", t.resolve_ms },
+    { "Mount runtimepath", t.mount_ms },
+    { "Plugin initialization", t.config_ms },
+    { "Native sourced scripts", t.native_ms },
+    { "Other startup work", t.other_ms },
+  }
+  b:line({ { "Startup stages", "PluginToolsTitle" } })
+  local bars = math.max(0, math.min(24, b.inner - 42))
+  for _, stage in ipairs(stages) do
+    local fraction = t.total_ms and t.total_ms > 0 and (stage[2] or 0) / t.total_ms or 0
+    local filled = math.min(bars, math.floor(fraction * bars + 0.5))
+    b:line({
+      { pad(stage[1], math.min(24, math.max(1, b.inner - 14))), "PluginToolsMuted" },
+      { "  " .. pad(milliseconds(stage[2]), 11), "PluginToolsTiming" },
+      { "  " .. string.rep("━", filled), "PluginToolsActive" },
+      { string.rep("─", bars - filled), "PluginToolsBorder" },
+    })
+  end
+  b:wrap(
+    t.scope == "startup" and "Scope: declaration resolution → VimEnter; earlier init is excluded."
+      or "Scope: manager start only; Neovim had already entered.",
+    "",
+    "PluginToolsMuted"
+  )
+  b:wrap("Self times exclude nested plugin calls. LATER records activation after startup.", "", "PluginToolsMuted")
+  if (t.incomplete_sources or 0) > 0 then
+    b:wrap("Interrupted source samples were omitted: " .. t.incomplete_sources, "", "PluginToolsWarning")
+  end
+  b:line()
+  b:line({
+    { "Plugin timings", "PluginToolsTitle" },
+    { "  ·  ", "PluginToolsMuted" },
+    { "t ", "PluginToolsKey" },
+    { view.sort == "name" and "sorted by name" or "slowest startup first", "PluginToolsMuted" },
+  })
+end
+
 function M.render(view, window_width)
   local b = setmetatable({
     window_width = window_width,
@@ -360,10 +474,13 @@ function M.render(view, window_width)
     by_id = {},
     selected = {},
   }, Builder)
-  local items, task = view.manager:status(), view.manager.last_operation
+  local report = view.manager:profile()
+  local items, task = report.plugins, view.manager.last_operation
   b:line()
   b:line({
     { "Plugins", view.mode == "status" and "PluginToolsTabActive" or "PluginToolsTab" },
+    { "   /   ", "PluginToolsMuted" },
+    { "Startup", view.mode == "profile" and "PluginToolsTabActive" or "PluginToolsTab" },
     { "   /   ", "PluginToolsMuted" },
     { "Operation log", view.mode == "log" and "PluginToolsTabActive" or "PluginToolsTab" },
     { view.mode == "help" and "   /   Help" or "", "PluginToolsTabActive" },
@@ -379,6 +496,17 @@ function M.render(view, window_width)
     end
   end
   b:line(summary)
+  local timings = report.timings
+  if timings.enabled then
+    b:wrap(
+      (timings.scope == "startup" and "Managed startup " or "Manager startup ")
+        .. milliseconds(timings.total_ms)
+        .. (timings.complete and "" or "  ·  collecting until VimEnter")
+        .. (timings.boundary == "failed" and "  ·  failed" or ""),
+      "",
+      "PluginToolsTiming"
+    )
+  end
   local selected = vim.tbl_count(view.selected) .. " selected"
   local filter = M.fit(
     "Filter: " .. (view.filter ~= "" and view.filter or "all plugins"),
@@ -461,6 +589,9 @@ function M.render(view, window_width)
   elseif view.mode == "log" then
     log(b, task)
   else
+    if view.mode == "profile" then
+      startup(b, view, timings)
+    end
     plugins(b, view, items, task)
   end
   b:line()
