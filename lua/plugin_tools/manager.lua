@@ -120,7 +120,16 @@ end
 
 function Manager:mount(id)
   U.check(self.started, "call start() before mounting")
-  self.runtime:mount(id)
+  local ok, err = pcall(self.runtime.mount, self.runtime, id)
+  if not ok then
+    local state = self.states[id]
+    if state and state.phase ~= "missing" then
+      state.phase, state.error = "failed", err
+    end
+    error(err, 0)
+  end
+  local state = self.states[id]
+  state.mount_reason = state.reason or "explicit mount"
   return self
 end
 

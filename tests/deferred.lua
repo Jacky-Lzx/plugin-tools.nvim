@@ -183,5 +183,21 @@ H.case("invalid declarations and late script errors remain explicit", function()
   reset()
 end)
 
+H.case("explicit mount failures are inspectable without calling setup", function()
+  local dir = H.root .. "/mount-failure"
+  H.write(dir .. "/plugin/broken.lua", "error('mount source failure')")
+  local m = Tools.new({ specs = { { id = "broken", dir = dir, mount = "on-demand" } } }):start()
+  H.raises(function()
+    m:mount("broken")
+  end, "mount source failure")
+  H.eq(m.states.broken.phase, "failed")
+  assert(m:explain("broken").state.error:find("mount source failure", 1, true))
+  H.raises(function()
+    m:mount("broken")
+  end, "previous runtime loading failed")
+  H.eq(m.states.broken.count, 0)
+  reset()
+end)
+
 vim.o.loadplugins = loadplugins
 H.finish()

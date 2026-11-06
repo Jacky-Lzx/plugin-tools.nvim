@@ -163,8 +163,8 @@ local function details(b, view, item, progress)
   if #info.ft > 0 then
     b:detail("Filetypes", table.concat(info.ft, ", "))
   end
-  if state.reason then
-    b:detail("Trigger", state.reason)
+  if state.reason or state.mount_reason then
+    b:detail("Trigger", state.reason or state.mount_reason)
   end
   b:detail("Directory", home(info.dir), "PluginToolsPath")
   if info.package ~= info.id then
