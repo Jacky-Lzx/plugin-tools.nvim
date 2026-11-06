@@ -31,8 +31,8 @@ replace/clear assignments. Labels inherit through children; manifest positions
 are always recorded. Conflicts identify both sources. History stores metadata,
 not extra copies of option values; opts contains the final merged values.
 
-Root nodes default to start=true; children default to start=false. main names
-the module whose setup(opts) runs on activation. config(ctx) replaces setup;
+Ordinary roots default to start=true; children and deferred/ft nodes default
+to start=false. main names the module whose setup(opts) runs on activation. config(ctx) replaces setup;
 config=false suppresses setup. enabled=false omits that contribution and its
 subtree. There is no separate bootstrap phase. Plugins own commands, APIs and
 feature events; personal mappings and adapters belong in config(ctx). Keep setup
@@ -42,13 +42,33 @@ dependencies contains IDs or {id='other', optional=true}. It guarantees declared
 availability, without initialization or activation ordering. after explicitly
 requires initialization of other nodes first. Optional references may be absent.
 
-ctx provides id, dir, opts and dependency-only has(id), activate(id), use(id)
-closures. use initializes the target once and returns require(main). The plugin
+ctx provides id, dir, opts and dependency-only has(id), mount(id), activate(id),
+use(id) closures. use initializes the target once and returns require(main). The plugin
 decides when to call it. Context functions use dot calls; managers use colon calls.
 
-start=false does not suppress native plugin/ scripts. Expensive work must be
-deferred by the plugin itself. The manager does not intercept require(), install
-loading triggers, replay runtime scripts, or unload initialized modules.
+start=false controls initialization only. With the default mount='startup',
+all selected runtime roots remain available to native loading.
+
+A package owner may set mount='on-demand' to keep its runtime off runtimepath
+until mount(id), activate(id), use(id), or a matching ft triggers it. activate
+and use also initialize the target once. mount exposes runtime files and sources
+native plugin scripts without calling setup. Same-directory children share
+mounting but retain separate initialization; path components mount their owner
+and component roots. dependencies never mount or initialize their targets
+implicitly; request resources through ctx.mount or features through ctx.use.
+
+ft={'tex','plaintex'} contains literal filetypes. Matching existing and future
+buffers initialize the node once, honoring after. An explicit start=true with ft
+is rejected. The plugin must attach the current buffer and subsequent buffers;
+the manager does not replay FileType. Keep filetype detection and settings needed
+by native ftplugins available early.
+
+Late mounts source plugin/ Vim files, then Lua files, followed by after/plugin/
+Vim and Lua files, before configuration. loadplugins is honored. Temporary exact
+SourceCmd guards prevent repeat native startup sourcing before VimEnter. Native
+source errors are retained; missing FileType/ftdetect/ftplugin phases are not
+replayed. Retain startup mounting for plugins requiring unadapted native phases.
+The manager does not intercept require() or unload initialized modules.
 
 COMMANDS                                                 *:PluginTools*
 
@@ -91,6 +111,7 @@ API                                                        *plugin-tools-api*
 >
   local m = require('plugin_tools').new(options)
   m:start()
+  m:mount(id)
   m:activate(id)
   local module = m:use(id)
   local available = m:has(id)
@@ -142,7 +163,8 @@ wrappers are installed. Plugin-internal first-use work is not measured unless
 it runs inside a managed activation. Interrupted source samples are omitted.
 manager:profile() returns copied {timings, plugins}. states retain duration_ms
 (inclusive activation), self_ms, startup_config_ms, scripts_ms, startup_ms,
-deferred_ms and source samples where measured.
+deferred_ms, deferred_scripts_ms, mount_ms and source samples where measured.
+explain(id) also reports mount policy, filetypes, state and activation reason.
 Operation options: ids, concurrency, timeout, on_complete; clean accepts dry_run
 (default true) and operates on the whole manifest. Check :checkhealth plugin_tools.
 

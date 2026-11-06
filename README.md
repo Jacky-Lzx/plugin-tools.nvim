@@ -127,7 +127,8 @@ runtime files and runs native plugin scripts, but does not call setup. It does n
 source ftdetect/ftplugin files or replay past events. Plugins depending on those
 startup phases should retain startup mounting until explicitly adapted.
 
-`start = false` controls **manager configuration only**. It does not prevent native
+With startup mounting, `start = false` controls **manager configuration only**.
+It does not prevent native
 `plugin/`, `ftdetect/`, `ftplugin/`, or other runtime scripts from executing. A
 backend with expensive native startup scripts must first move that work into its
 own API. This manager does not rewrite third-party plugin lifecycles.
@@ -214,7 +215,8 @@ flag is independent of optional dependency references.
 
 The manager does not discover or execute project files. Selection happens before
 startup mounting; changing projects in an existing session does not unload plugins.
-`start = false` continues to mean mounted but not configured, rather than dormant.
+With default startup mounting, `start = false` means mounted but not configured,
+rather than dormant. Explicit `mount = "on-demand"` independently delays mounting.
 
 All selected, enabled declarations participate in installation. Dependencies are validated
 references, not a discovery or version resolution system. Required references
