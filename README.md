@@ -1,11 +1,11 @@
 # plugin-tools.nvim
 
-A small Neovim plugin manager for explicit plugin composition and plugin-owned
-on-demand initialization. Requires Neovim 0.11+ and Git for package operations.
+A small Neovim plugin manager for explicit plugin composition and on-demand
+runtime mounting and initialization. Requires Neovim 0.11+ and Git for package operations.
 
 The manager installs packages, mounts runtime directories, applies configuration,
 and explains relationships. Plugins decide when their features do work. There are
-no event/key/command/filetype loading specifications, `require()` hooks, module
+no general event/key/command loading specifications, `require()` hooks, module
 scans, polling timers, automatic downloads, or update checks during startup.
 
 ## Use the local checkout
@@ -97,14 +97,44 @@ function from `config(ctx)` into the frontend's setup options. The plugin calls
 that provider only when needed. Or give the backend a lightweight setup and let
 its public API lazily initialize expensive internals itself.
 
+`mount = "on-demand"` keeps a package off runtimepath until `mount(id)`,
+`activate(id)`, `use(id)` or a declared `ft` matches. It defaults to not starting;
+`start = true` explicitly overrides that default. Same-checkout children share the
+package policy and runtime directory, but retain independent initialization.
+Children with `path` mount their component plus the package root when activated.
+Existing declarations default to `mount = "startup"`.
+
+```lua
+{ id = "tex-tools.nvim", source = "Jacky-Lzx/tex-tools.nvim", main = "tex-tools",
+  mount = "on-demand", ft = { "tex", "plaintex" }, opts = {} }
+```
+
+`ft` contains literal filetypes and initializes once, including buffers that exist
+before manager setup. Repeated declarations combine filetypes in declaration order.
+It defaults `start` to false and rejects an explicit `start = true`. The plugin's
+setup must attach existing matching buffers as well as future buffers; the manager
+does not replay FileType or ftplugin scripts. Keep filetype detection rules and
+settings required by native ftplugins in the host's early configuration.
+
+Late mounting sources only that runtime root's `plugin/**/*.vim`, then Lua files,
+then `after/plugin/` Vim and Lua files, before configuration. It honors
+`loadplugins` and uses temporary exact-file SourceCmd guards before VimEnter to
+prevent duplicate native startup sourcing. Source events retain their normal
+behavior; explicit script timings are measured by the manager, including when
+source events are suppressed inside a non-nested FileType callback.
+Runtime source errors are retained and are not silently retried. A mount exposes
+runtime files and runs native plugin scripts, but does not call setup. It does not
+source ftdetect/ftplugin files or replay past events. Plugins depending on those
+startup phases should retain startup mounting until explicitly adapted.
+
 `start = false` controls **manager configuration only**. It does not prevent native
 `plugin/`, `ftdetect/`, `ftplugin/`, or other runtime scripts from executing. A
 backend with expensive native startup scripts must first move that work into its
 own API. This manager does not rewrite third-party plugin lifecycles.
 
 Call `setup()` during `init.lua`. Native Neovim loads `plugin/` and `after/plugin/`
-scripts in its usual startup phases; the manager neither sources nor replays
-them. Mounting after startup does not replay missed events or native scripts.
+scripts for startup-mounted roots in its usual phases. The manager sources native
+plugin scripts only for on-demand roots, as described above.
 Managed roots are inserted before the built-in runtime, preserving preceding
 configuration directories. Managed `after/` directories precede existing
 configuration `after/` directories so user overrides still apply last.
@@ -139,7 +169,9 @@ Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
 | `after` | IDs that must initialize before this node; activates them when necessary |
 | `enabled` | Boolean or zero-argument predicate; false omits this contribution and its subtree |
 | `optional` | Keep defaults dormant until another enabled, non-optional declaration selects the same ID |
-| `start` | Initialize during startup; defaults true for roots, false for children |
+| `start` | Initialize during startup; defaults true for ordinary roots, false for children and deferred/ft nodes |
+| `mount` | Package owner: `"startup"` (default) or `"on-demand"` |
+| `ft` | Literal filetype list triggering initialization once; combines across declarations |
 | `main` | Module passed to `require()` on activation; default activation calls its `setup(opts)` |
 | `opts` | Configuration table, copied before passing to plugin code |
 | `config` | `function(ctx)` replacing default setup, or false to skip automatic setup |
@@ -204,7 +236,7 @@ assignments. History stores metadata only; final option values remain in `opts`.
 Missing labels use `manifest` plus a position such as `specs[2].children[1]`.
 
 `ctx` contains `id`, `dir`, a private `opts` copy, and `has(id)`, `activate(id)`,
-and `use(id)` closures. Those closures accept only dependencies declared by that
+`mount(id)`, and `use(id)` closures. Those closures accept only dependencies declared by that
 node. `has()` inspects availability without loading modules. A context uses dot
 calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`).
 Nonempty `opts` are copied and cached on first access; a callback that only
@@ -226,6 +258,7 @@ Synchronous inspection/runtime methods:
 
 ```lua
 manager:has(id)       -- Declared and not known missing; no require(), Git, or source scan
+manager:mount(id)     -- Expose runtime and native scripts without running setup
 manager:activate(id)  -- Configure once; explicit after prerequisites are activated first
 manager:use(id)       -- Activate and return require(main); main is required
 manager:status()      -- Copies of registered/mounted/ready/missing/failed states

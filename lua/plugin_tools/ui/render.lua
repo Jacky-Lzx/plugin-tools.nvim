@@ -156,6 +156,16 @@ local function details(b, view, item, progress)
       b:detail("Script", home(script.file) .. "  ·  " .. milliseconds(script.self_ms))
     end
   end
+  b:detail("Mount policy", info.mount)
+  if state.mount_ms then
+    b:detail("Mount", milliseconds(state.mount_ms))
+  end
+  if #info.ft > 0 then
+    b:detail("Filetypes", table.concat(info.ft, ", "))
+  end
+  if state.reason then
+    b:detail("Trigger", state.reason)
+  end
   b:detail("Directory", home(info.dir), "PluginToolsPath")
   if info.package ~= info.id then
     b:detail("Package", info.package)

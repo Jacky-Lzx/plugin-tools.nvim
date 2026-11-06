@@ -45,6 +45,10 @@ function Manager:_context(n)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
       return self:use(id)
     end,
+    mount = function(id)
+      U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
+      return self:mount(id)
+    end,
     activate = function(id)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
       return self:activate(id)
@@ -84,78 +88,13 @@ function Manager:start()
 end
 
 function Manager:_start()
-  local paths, afters, seen, missing, directories = {}, {}, {}, {}, {}
-  for _, id in ipairs(self.graph.order) do
-    local n = self.graph.nodes[id]
-    if directories[n.dir] == nil then
-      directories[n.dir] = U.directory(n.dir)
-    end
-    if directories[n.dir] then
-      self.states[id].phase = "mounted"
-      if not seen[n.dir] then
-        seen[n.dir], paths[#paths + 1] = true, n.dir
-        local after = n.dir .. "/after"
-        if U.directory(after) then
-          afters[#afters + 1] = after
-        end
-      end
-    else
-      self.states[id].phase = "missing"
-      missing[#missing + 1] = id
-    end
-  end
-  U.check(
-    self.options.strict == false or #missing == 0,
-    "missing plugin directories: " .. table.concat(missing, ", ") .. "; run install() before starting"
-  )
-  local runtime = U.runtime_paths()
-  local managed_paths, managed = paths, seen
-  for _, path in ipairs(afters) do
-    managed[path] = true
-  end
-  paths, seen = {}, {}
-  local inserted, inserted_afters = false, false
-  local function append(path)
-    if not seen[path] then
-      seen[path], paths[#paths + 1] = true, path
-    end
-  end
-  local function insert_managed()
-    if not inserted then
-      for _, path in ipairs(managed_paths) do
-        append(path)
-      end
-      inserted = true
-    end
-  end
-  local function insert_afters()
-    if not inserted_afters then
-      for i = #afters, 1, -1 do
-        append(afters[i])
-      end
-      inserted_afters = true
-    end
-  end
-  for _, path in ipairs(runtime) do
-    local is_after = path:match("[/\\]after$") ~= nil
-    if path == vim.env.VIMRUNTIME or is_after then
-      insert_managed()
-    end
-    if is_after then
-      insert_afters()
-    end
-    if not managed[path] then
-      append(path)
-    end
-  end
-  insert_managed()
-  insert_afters()
-  -- A single option assignment avoids rebuilding Neovim's runtime cache N times.
-  U.set_runtime_paths(paths)
+  self.runtime = require("plugin_tools.runtime").new(self)
+  self.runtime:start()
   self.timings.mount_ms = (vim.uv.hrtime() - self._start_at) / 1e6
   self.started = true
   for _, id in ipairs(self.graph.activation_order) do
     if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
+      self.states[id].reason = "startup"
       local ok, err = pcall(self.activate, self, id)
       if not ok then
         self.start_error = err
@@ -163,6 +102,26 @@ function Manager:_start()
       end
     end
   end
+  local ok, err = pcall(self._watch_filetypes, self)
+  if not ok then
+    self.start_error = err
+    U.fail(err)
+  end
+end
+
+function Manager:_watch_filetypes()
+  for _, id in ipairs(self.graph.order) do
+    if #self.graph.nodes[id].ft > 0 then
+      require("plugin_tools.triggers").watch(self)
+      return
+    end
+  end
+end
+
+function Manager:mount(id)
+  U.check(self.started, "call start() before mounting")
+  self.runtime:mount(id)
+  return self
 end
 
 function Manager:activate(id)
@@ -175,12 +134,14 @@ function Manager:activate(id)
   U.check(state.phase ~= "missing", id .. ": plugin directory is missing")
   U.check(state.phase ~= "initializing", "activation cycle: " .. table.concat(self.stack, " -> ") .. " -> " .. id)
   U.check(state.phase ~= "failed", id .. ": previous initialization failed: " .. tostring(state.error))
+  state.reason = state.reason or "explicit"
   state.phase, self.stack[#self.stack + 1] = "initializing", id
   local frame = self._profile and self._profile:begin("config", id)
   local ok, err = xpcall(function()
     for _, before in ipairs(n.after) do
       self:activate(before)
     end
+    self:mount(id)
     if n.config then
       n.config(self:_context(n))
     elseif n.config ~= false and n.main then
@@ -269,6 +230,8 @@ function Manager:explain(id)
     dependencies = vim.deepcopy(n.dependencies),
     after = vim.deepcopy(n.after),
     start = n.start,
+    mount = n.mount,
+    ft = vim.deepcopy(n.ft),
     opts = vim.deepcopy(n.opts),
     declarations = vim.deepcopy(n.declarations),
     option_history = vim.deepcopy(n.option_history),

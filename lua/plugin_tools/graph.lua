@@ -15,12 +15,14 @@ local fields = {
   enabled = true,
   optional = true,
   start = true,
+  mount = true,
+  ft = true,
   main = true,
   opts = true,
   config = true,
   build = true,
 }
-local scalars = { "source", "dir", "dev", "version", "path", "start", "main", "config", "build" }
+local scalars = { "source", "dir", "dev", "version", "path", "start", "mount", "main", "config", "build" }
 
 local function valid_id(id)
   return type(id) == "string" and id:match("^[%w][%w_.-]*$") and id ~= "." and id ~= ".."
@@ -123,6 +125,8 @@ function M.resolve(specs, opts)
         dependencies = {},
         after = {},
         after_set = {},
+        ft = {},
+        ft_set = {},
         parents = {},
         roots = false,
         declarations = contributions,
@@ -185,6 +189,15 @@ function M.resolve(specs, opts)
       local previous = n.dependencies[target]
       n.dependencies[target] = (previous == nil and optional) or (previous == true and optional) or false
     end
+    for _, ft in ipairs(list(spec.ft or {}, id .. ".ft")) do
+      U.check(
+        type(ft) == "string" and ft ~= "" and not ft:find("[*,%[%]{}?]"),
+        id .. ": ft must contain literal filetypes"
+      )
+      if not n.ft_set[ft] then
+        n.ft[#n.ft + 1], n.ft_set[ft] = ft, true
+      end
+    end
     for _, target in ipairs(list(spec.after or {}, id .. ".after")) do
       U.check(valid_id(target), id .. ": invalid after id")
       if not n.after_set[target] then
@@ -218,9 +231,14 @@ function M.resolve(specs, opts)
         or (type(n.build) == "table" and vim.islist(n.build) and #n.build > 0),
       id .. ": build must be argv or a function"
     )
+    U.check(
+      n.mount == nil or n.mount == "startup" or n.mount == "on-demand",
+      id .. ": mount must be 'startup' or 'on-demand'"
+    )
     if n.start == nil then
-      n.start = n.roots
+      n.start = n.roots and n.mount ~= "on-demand" and #n.ft == 0
     end
+    U.check(not n.start or #n.ft == 0, id .. ": ft requires start = false")
     if n.owner == id then
       U.check(n.source or n.dir, id .. ": a top-level package needs source or dir")
       U.check(not n.path, id .. ": path belongs on same-package children")
@@ -250,6 +268,7 @@ function M.resolve(specs, opts)
     U.check(package, id .. ": missing package owner " .. n.owner)
     n.package = package
     if n.owner ~= id then
+      U.check(not n.mount, id .. ": mount belongs on the package owner")
       U.check(not n.version and not n.dev and not n.build, id .. ": version/dev/build belong on the package owner")
     end
     if n.path then
@@ -263,6 +282,7 @@ function M.resolve(specs, opts)
       )
       n.path = normalized
     end
+    n.mount = nodes[n.owner].mount or "startup"
     n.dir = package.dir .. (n.path and ("/" .. n.path) or "")
     for dep, optional in pairs(n.dependencies) do
       U.check(

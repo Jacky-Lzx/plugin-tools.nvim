@@ -28,6 +28,7 @@ for _, method in ipairs({
   "start",
   "has",
   "activate",
+  "mount",
   "use",
   "status",
   "profile",

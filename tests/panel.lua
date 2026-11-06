@@ -182,7 +182,7 @@ H.case("startup profile sorts timings, keeps focus and adapts to narrow windows"
   H.eq(panel:current(), "slow")
   assert(panel.selected.slow)
   press("<CR>")
-  assert(contents():find("plugin/slow.lua", 1, true))
+  assert(contents():gsub("%s", ""):find("plugin/slow.lua", 1, true))
   for _, size in ipairs({ 132, 88, 60, 38 }) do
     vim.api.nvim_win_set_width(panel.win, size)
     panel:render()

@@ -47,7 +47,11 @@ function Profile:leave(frame)
       self.manager.timings.config_ms = self.manager.timings.config_ms + own
     end
   else
-    self.manager.timings.native_ms = self.manager.timings.native_ms + own
+    if self.recording then
+      self.manager.timings.native_ms = self.manager.timings.native_ms + own
+    elseif state then
+      state.deferred_scripts_ms = (state.deferred_scripts_ms or 0) + own
+    end
     if state then
       state.scripts_ms = (state.scripts_ms or 0) + own
       state.scripts = state.scripts or {}
@@ -122,6 +126,9 @@ function Profile.new(manager)
     group = self.group,
     callback = function(args)
       local file, owner = vim.fs.normalize(args.file)
+      if self.manual_sources and self.manual_sources[file] then
+        return
+      end
       for _, dir in ipairs(paths) do
         if vim.startswith(file, dir .. "/") then
           owner = roots[dir]
@@ -135,6 +142,9 @@ function Profile.new(manager)
     group = self.group,
     callback = function(args)
       local file = vim.fs.normalize(args.file)
+      if self.manual_sources and self.manual_sources[file] then
+        return
+      end
       for i = #self.stack, 1, -1 do
         local frame = self.stack[i]
         if frame.kind == "script" and frame.file == file then
