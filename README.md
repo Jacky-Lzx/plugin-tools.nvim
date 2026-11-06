@@ -298,9 +298,11 @@ Build argv runs without an implicit shell. A Lua build function runs on Neovim's
 main thread; use argv for expensive work.
 
 Only after every package succeeds are complete directories published, with
-backups retained until the lockfile is atomically replaced. Caught failures roll
-back published checkouts. Help tags are generated when a `doc/` directory exists.
-Other build outputs must be gitignored; a dirty build is rejected.
+backups retained until the lockfile is atomically replaced. JSON is written with
+two-space indentation, sorted object keys, and a final newline for stable Git
+diffs. Caught failures roll back published checkouts. Help tags are generated when
+a `doc/` directory exists. Other build outputs must be gitignored; a dirty build
+is rejected.
 
 Tracked/untracked changes block replacement and cleanup. A checkout moved away
 from its locked commit blocks update; explicitly freeze or restore it first.

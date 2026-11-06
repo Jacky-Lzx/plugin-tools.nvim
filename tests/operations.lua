@@ -20,6 +20,20 @@ H.case("asynchronous install publishes checkout and precise lockfile", function(
   H.wait(task)
   H.eq(H.git(root .. "/source", "rev-parse", "HEAD"), initial)
   H.eq(U.read_json(lockfile).plugins.source.commit, initial)
+  H.eq(vim.fn.readfile(lockfile), {
+    "{",
+    '  "plugins": {',
+    '    "source": {',
+    '      "commit": "' .. initial .. '",',
+    '      "source": ' .. vim.json.encode(source),
+    "    }",
+    "  },",
+    '  "version": 1',
+    "}",
+  })
+  local formatted = vim.fn.readfile(lockfile, "b")
+  H.wait(m:freeze())
+  H.eq(vim.fn.readfile(lockfile, "b"), formatted)
   H.eq(U.read_json(root .. "/source/.git/plugin-tools-owner.json").id, "source")
   H.eq(vim.uv.fs_stat(root .. "/.operation-lock"), nil)
 end)

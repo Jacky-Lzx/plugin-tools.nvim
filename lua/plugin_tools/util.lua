@@ -76,13 +76,30 @@ function M.read_json(path, default)
   return value
 end
 
+local function format_json(value, depth)
+  if type(value) ~= "table" or next(value) == nil then
+    return vim.json.encode(value)
+  end
+  local list, keys, lines = vim.islist(value), vim.tbl_keys(value), {}
+  table.sort(keys)
+  local indent = string.rep("  ", depth)
+  for _, key in ipairs(keys) do
+    local prefix = list and "" or (vim.json.encode(key) .. ": ")
+    lines[#lines + 1] = indent .. "  " .. prefix .. format_json(value[key], depth + 1)
+  end
+  local open, close = list and "[" or "{", list and "]" or "}"
+  return open .. "\n" .. table.concat(lines, ",\n") .. "\n" .. indent .. close
+end
+
 function M.write_json(path, value)
+  -- Normalize with the native codec to retain its array/object/null semantics
+  -- and reject invalid values before creating a temporary file.
+  local data = format_json(vim.json.decode(vim.json.encode(value)), 0) .. "\n"
   M.mkdir(vim.fs.dirname(path))
   local temporary, err = uv.fs_mkstemp(path .. ".XXXXXX")
   M.check(temporary, "cannot create temporary file: " .. tostring(err))
   -- fs_mkstemp returns a descriptor followed by its path.
   local fd, name = temporary, err
-  local data = vim.json.encode(value) .. "\n"
   local count, write_err = uv.fs_write(fd, data, 0)
   local synced, sync_err = uv.fs_fsync(fd)
   uv.fs_close(fd)
