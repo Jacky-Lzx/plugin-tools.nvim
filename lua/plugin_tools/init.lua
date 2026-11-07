@@ -34,6 +34,7 @@ for _, method in ipairs({
   "use",
   "status",
   "profile",
+  "diagnostics",
   "open",
   "explain",
   "install",

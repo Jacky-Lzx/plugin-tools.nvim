@@ -350,6 +350,13 @@ Inactive records have `selected=false`, an empty directory and no runtime.
 Activation state includes a `trigger` with kind, parent/action or filetype
 where applicable, and the activation chain. First activation retains its cause.
 
+`diagnostics()` returns issues with level, message and advice. It inspects
+operation locks, recovery journals, prior failures and managed checkout/lockfile
+consistency. `:checkhealth plugin_tools` renders the same issues. Explicit
+inspection may run bounded, local Git commands; it never fetches or repairs.
+Checkout drift checks are skipped while an operation lock exists. Startup and
+`status()` do not run these checks.
+
 Synchronous inspection/runtime methods:
 
 >lua

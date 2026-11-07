@@ -236,6 +236,10 @@ function Manager:profile()
   return { timings = timings, plugins = self:status() }
 end
 
+function Manager:diagnostics()
+  return require("plugin_tools.diagnostics").collect(self)
+end
+
 function Manager:open(opts)
   return require("plugin_tools.ui").open(self, opts)
 end
