@@ -8,6 +8,8 @@ plugin collection. Preserve public API names and existing help tags when editing
 - `README.md` explains the purpose, requirements, installation and first action.
 - `doc/<plugin>.txt` is the complete in-editor option, command and API reference.
 - Markdown guides explain workflows, integration, migration and architecture.
+- [Plugin authoring](plugin-authoring.md) defines shared design, lifecycle and
+  manager integration standards; individual plugin help remains the API contract.
 - `tests/README.md` explains development prerequisites and validation.
 
 A workflow guide may show a particular configuration. Complete defaults and API

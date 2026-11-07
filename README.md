@@ -138,6 +138,7 @@ require("plugin_tools").setup({ specs = {} })
 
 - [Complete reference](doc/plugin-tools.txt) — `:help plugin-tools`.
 - [Workflow and integration guide](doc/guide.md).
+- [Plugin design, implementation and manager integration](doc/plugin-authoring.md).
 - Diagnose availability with `:checkhealth plugin_tools`.
 
 ## Development

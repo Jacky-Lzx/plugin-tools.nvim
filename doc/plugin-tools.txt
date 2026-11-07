@@ -8,6 +8,7 @@ CONTENTS                                                        *plugin-tools*
   Options             |plugin-tools-options|
   Lua API             |plugin-tools-api|
   Lifecycle           |plugin-tools-lifecycle|
+  Plugin authoring    |plugin-tools-authoring|
   Troubleshooting     |plugin-tools-troubleshooting|
 
 ==============================================================================
@@ -97,6 +98,20 @@ or lockfile reads occur if all packages are present. Self updates use the same
 plan/apply, update, restore and freeze operations and ownership checks as other
 packages. The running session keeps the old Lua modules until restart. Do not
 manually clear package.loaded entries to reload the updated manager in place.
+
+PLUGIN AUTHORING                                      *plugin-tools-authoring*
+
+See doc/plugin-authoring.md in the source checkout for the shared plugin design,
+implementation and integration standard. It describes configuration versus
+feature ownership, lightweight entry points, setup/disposal, async validity,
+command/mapping ownership, themes, and test expectations, with source examples
+from config.nvim and the plugin collection.
+
+Feature plugins use their own public APIs and lifecycle. Configuration supplies
+specs and adapters; config(ctx) replaces automatic main.setup(opts). The
+manager does not require feature modules to import plugin_tools or implement a
+generic unload interface. See |plugin-tools-composition| and
+|plugin-tools-reference-specification| for the manager's exact declarations.
 
 COMPOSITION                                         *plugin-tools-composition*
 

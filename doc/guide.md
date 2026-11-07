@@ -4,6 +4,8 @@
 
 Configuration defaults and API contracts are maintained in the help reference.
 The examples here illustrate particular workflows.
+For reusable plugin implementation and lifecycle rules, see the
+[plugin authoring standard](plugin-authoring.md).
 
 ## Installation details
 
