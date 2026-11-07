@@ -2,55 +2,8 @@ local U = require("plugin_tools.util")
 local uv = vim.uv
 local M = {}
 
-local function lock_data(manager)
-  local data = U.read_json(manager.lockfile, { version = 1, plugins = {} })
-  U.check(data.version == 1 and type(data.plugins) == "table", "unsupported lockfile " .. manager.lockfile)
-  for id, entry in pairs(data.plugins) do
-    U.check(
-      type(id) == "string"
-        and type(entry) == "table"
-        and type(entry.source) == "string"
-        and type(entry.commit) == "string"
-        and entry.commit:match("^%x+$")
-        and #entry.commit == 40,
-      "invalid lockfile entry " .. tostring(id)
-    )
-  end
-  return data
-end
-
-local function owned(package)
-  local stat = uv.fs_lstat(package.dir)
-  if not stat then
-    return false
-  end
-  U.check(stat.type == "directory", "refusing non-directory package " .. package.dir)
-  local git = uv.fs_lstat(package.dir .. "/.git")
-  U.check(git and git.type == "directory", "refusing unmanaged checkout " .. package.dir)
-  local marker = U.read_json(package.dir .. "/.git/plugin-tools-owner.json", {})
-  U.check(marker.id == package.id and marker.source == package.source, "ownership/source mismatch for " .. package.dir)
-  return true, marker
-end
-
-local function selected(manager, opts)
-  local wanted = {}
-  if opts.ids then
-    U.check(type(opts.ids) == "table" and vim.islist(opts.ids), "ids must be a list")
-    for _, id in ipairs(opts.ids) do
-      local n = manager.graph.nodes[id]
-      U.check(n, "unknown plugin " .. tostring(id))
-      wanted[n.owner] = true
-    end
-  end
-  local out = {}
-  for _, id in ipairs(manager.graph.package_order) do
-    local p = manager.graph.packages[id]
-    if p.managed and (not opts.ids or wanted[id]) then
-      out[#out + 1] = p
-    end
-  end
-  return out
-end
+local Packages = require("plugin_tools.operations.packages")
+local owned, selected, lock_data = Packages.owned, Packages.selected, Packages.lock_data
 
 -- One coroutine per operation, with bounded asynchronous staging workers. All
 -- filesystem publication happens on the main thread after every worker succeeds.
@@ -79,23 +32,6 @@ function M.run(manager, action, opts)
   local co
   local worker_ids = {}
   local transaction, keep_lock, review
-  local processes = {}
-  local grouped = vim.fn.has("win32") == 0
-  local function terminate(handle)
-    -- Dedicated Unix process groups include Git helpers and ordinary build
-    -- children. Kill before rollback can remove their working directories.
-    if grouped then
-      uv.kill(-handle.pid, 9)
-    else
-      pcall(handle.kill, handle, 9)
-    end
-  end
-  task._cancel = function()
-    for handle in pairs(processes) do
-      terminate(handle)
-    end
-  end
-
   local function resume(thread, ...)
     local ok, err = coroutine.resume(thread, ...)
     if not ok then
@@ -105,308 +41,18 @@ function M.run(manager, action, opts)
     end
   end
 
-  local function process(argv, cwd)
-    task:check_cancelled()
-    local thread = coroutine.running()
-    U.check(thread, "internal process call outside operation")
-    local ok, err = pcall(
-      vim.system,
-      argv,
-      { cwd = cwd, text = true, timeout = timeout, detach = grouped, env = { GIT_TERMINAL_PROMPT = "0" } },
-      function(result)
-        vim.schedule(function()
-          resume(thread, result)
-        end)
-      end
-    )
-    U.check(ok, "cannot start " .. tostring(argv[1]) .. ": " .. tostring(err))
-    local handle, process_key, journal_error = err
-    processes[handle] = true
-    if transaction then
-      process_key = tostring(handle.pid)
-      transaction.data.processes[process_key] =
-        { pid = handle.pid, command = argv[1], pgid = grouped and handle.pid or nil }
-      local saved, save_err = pcall(transaction.save, transaction)
-      if not saved then
-        journal_error = tostring(save_err)
-        terminate(handle)
-      end
-    end
-    local result = coroutine.yield()
-    processes[handle] = nil
-    if process_key then
-      transaction.data.processes[process_key] = nil
-      local saved, save_err = pcall(transaction.save, transaction)
-      if not saved then
-        journal_error = journal_error or tostring(save_err)
-      end
-    end
-    task:log(worker_ids[thread], argv, result)
-    U.check(not journal_error, "cannot journal process: " .. tostring(journal_error))
-    task:check_cancelled()
-    local output = result.stderr and result.stderr ~= "" and result.stderr or result.stdout or ""
-    U.check(
-      result.code == 0,
-      table.concat(argv, " ") .. " failed: " .. output .. " (exit " .. tostring(result.code) .. ")"
-    )
-    return vim.trim(result.stdout or "")
-  end
-
-  local function git(dir, ...)
-    local argv = { "git", "-c", "advice.detachedHead=false", "-C", dir }
-    vim.list_extend(argv, { ... })
-    return process(argv)
-  end
+  local runner = require("plugin_tools.operations.process").new(task, timeout, concurrency, resume)
+  worker_ids = runner.worker_ids
+  local git = runner.git
+  runner.task, runner.root, runner.staging = task, root, staging
+  runner.reviewed, runner.rebuild = reviewed, rebuild
+  local stage = require("plugin_tools.operations.checkout").new(runner)
 
   local function clean_staging()
-    local errors = {}
     if transaction then
-      local saved, err = pcall(transaction.cleanup_start, transaction)
-      if not saved then
-        return { tostring(err) }
-      end
+      return transaction:cleanup()
     end
-    for _, path in ipairs(staging) do
-      if uv.fs_lstat(path) and vim.fn.delete(path, "rf") ~= 0 then
-        errors[#errors + 1] = "cannot clean " .. path
-      end
-    end
-    return errors
-  end
-
-  local function changes(checkout, package, before, after)
-    local out = {
-      kind = not before and "install" or "unchanged",
-      commits = {},
-      files = {},
-      ahead = 0,
-      behind = 0,
-      files_changed = 0,
-      insertions = 0,
-      deletions = 0,
-      binary_files = 0,
-    }
-    if not before or before == after then
-      return out
-    end
-    -- A force-pushed source may no longer contain the installed commit. Import
-    -- that exact local object into staging without modifying the installed repo.
-    git(checkout, "fetch", "--quiet", "--no-tags", "--", package.dir, before)
-    local counts = git(checkout, "rev-list", "--left-right", "--count", before .. "..." .. after)
-    local behind, ahead = counts:match("^(%d+)%s+(%d+)$")
-    U.check(behind and ahead, "invalid Git history counts")
-    out.behind, out.ahead = tonumber(behind), tonumber(ahead)
-    out.kind = out.behind == 0 and "forward" or out.ahead == 0 and "rewind" or "diverged"
-    local log = git(checkout, "log", "--format=%H%x09%s", "--max-count=20", before .. ".." .. after, "--")
-    for line in log:gmatch("[^\n]+") do
-      local commit, subject = line:match("^(%x+)%s(.*)$")
-      if commit then
-        out.commits[#out.commits + 1] = { commit = commit, subject = subject }
-      end
-    end
-    out.commits_truncated = out.ahead > #out.commits
-    local stats =
-      git(checkout, "diff", "--numstat", "--no-ext-diff", "--no-textconv", "--no-renames", before, after, "--")
-    for line in stats:gmatch("[^\n]+") do
-      local added, removed, path = line:match("^([^\t]+)\t([^\t]+)\t(.*)$")
-      if path then
-        local binary = added == "-" or removed == "-"
-        out.files_changed = out.files_changed + 1
-        out.insertions = out.insertions + (tonumber(added) or 0)
-        out.deletions = out.deletions + (tonumber(removed) or 0)
-        out.binary_files = out.binary_files + (binary and 1 or 0)
-        if #out.files < 50 then
-          out.files[#out.files + 1] =
-            { path = path, added = tonumber(added), removed = tonumber(removed), binary = binary }
-        end
-      end
-    end
-    out.files_truncated = out.files_changed > #out.files
-    return out
-  end
-
-  local function stage(package, mode, lock)
-    task:emit("checking", package.id)
-    local exists, marker = owned(package)
-    local previous_commit
-    if exists then
-      U.check(
-        git(package.dir, "status", "--porcelain", "--untracked-files=normal") == "",
-        "local modifications in " .. package.dir
-      )
-      previous_commit = git(package.dir, "rev-parse", "HEAD")
-    end
-    task:emit("checking", package.id, { before_commit = previous_commit })
-    local preview = reviewed and reviewed.entries[package.id]
-    if preview then
-      U.check(
-        preview.source == package.source
-          and preview.version == package.version
-          and vim.deep_equal(preview.build, package.build),
-        package.id .. ": configuration changed since preview; create a new plan"
-      )
-      U.check(preview.before_commit == previous_commit, package.id .. ": checkout changed since preview")
-    end
-    local entry = lock.plugins[package.id]
-    local updating = mode == "update" or mode == "plan"
-    if updating and exists then
-      U.check(
-        (not entry or entry.source == package.source) and (entry and entry.commit or marker.commit) == previous_commit,
-        package.id .. ": checkout differs from lockfile; use freeze() or restore() first"
-      )
-    end
-    if mode == "install" and exists and not rebuild then
-      local commit = previous_commit
-      U.check(
-        not entry or (entry.source == package.source and entry.commit == commit),
-        package.id .. ": installed version differs from lockfile; use restore() or freeze()"
-      )
-      task:emit("staged", package.id, { after_commit = commit, unchanged = true })
-      return { package = package, commit = commit, unchanged = true }
-    end
-    if entry and not updating then
-      U.check(entry.source == package.source, package.id .. ": lockfile source differs from spec")
-    end
-    U.check(mode ~= "restore" or entry, package.id .. ": no locked revision to restore")
-    local temporary, err = uv.fs_mkdtemp(root .. "/.stage-" .. package.id .. "-XXXXXX")
-    U.check(temporary, "cannot stage " .. package.id .. ": " .. tostring(err))
-    staging[#staging + 1] = temporary
-    transaction:stage(temporary)
-    local checkout = temporary .. "/checkout"
-    local clone = { "git", "clone", "--quiet", "--filter=blob:none", "--no-checkout" }
-    if exists then
-      vim.list_extend(clone, { "--reference-if-able", package.dir, "--dissociate" })
-    end
-    vim.list_extend(clone, { "--", package.source, checkout })
-    task:emit("cloning", package.id)
-    process(clone)
-    local ref = (preview and preview.after_commit)
-      or (not updating and entry and entry.commit)
-      or package.version
-      or "HEAD"
-    U.check(not ref:match("^-"), package.id .. ": version cannot begin with '-' ")
-    -- Git clone stores remote branches under refs/remotes/origin; prefer an
-    -- explicit branch/tag and only then accept a commit-ish.
-    local revision
-    if ref == "HEAD" or (#ref == 40 and ref:match("^%x+$")) or ref:match("^refs/") then
-      revision = git(checkout, "rev-parse", "--verify", ref .. "^{commit}")
-    else
-      local refs =
-        git(checkout, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/" .. ref, "refs/tags/" .. ref)
-      local branch = "refs/remotes/origin/" .. ref
-      if vim.list_contains(vim.split(refs, "\n", { plain = true }), branch) then
-        ref = branch
-      end
-      revision = git(checkout, "rev-parse", "--verify", ref .. "^{commit}")
-    end
-    local recipe
-    if type(package.build) == "table" then
-      recipe = package.build
-    elseif package.build == nil then
-      recipe = false
-    end
-    local unchanged = exists
-      and revision == previous_commit
-      and not rebuild
-      and recipe ~= nil
-      and vim.deep_equal(marker.build, recipe)
-    task:emit(
-      "resolved",
-      package.id,
-      { after_commit = revision, unchanged = unchanged, build = package.build ~= nil and not unchanged }
-    )
-    if mode == "plan" then
-      task:emit("resolved", package.id, { changes = changes(checkout, package, previous_commit, revision) })
-      return { package = package, commit = revision, previous_commit = previous_commit }
-    end
-    if unchanged then
-      task:emit("staged", package.id)
-      return { package = package, commit = revision, unchanged = true }
-    end
-    task:emit("checkout", package.id)
-    git(checkout, "checkout", "--quiet", "--detach", revision)
-    task:emit("submodules", package.id)
-    git(checkout, "submodule", "update", "--init", "--recursive")
-    U.write_json(
-      checkout .. "/.git/plugin-tools-owner.json",
-      { id = package.id, source = package.source, commit = revision, transaction = transaction.data.id, build = recipe }
-    )
-    if package.build then
-      task:emit("building", package.id)
-      task:check_cancelled()
-      if type(package.build) == "function" then
-        package.build({
-          id = package.id,
-          dir = checkout,
-          cancelled = function()
-            return task.cancel_requested
-          end,
-        })
-        task:check_cancelled()
-      else
-        process(package.build, checkout)
-      end
-    end
-    if U.directory(checkout .. "/doc") then
-      task:emit("helptags", package.id)
-      vim.api.nvim_cmd({ cmd = "helptags", args = { checkout .. "/doc" } }, {})
-      -- Generated help tags are manager-owned build artifacts.
-      local exclude = assert(io.open(checkout .. "/.git/info/exclude", "a"))
-      exclude:write("\n/doc/tags\n/doc/tags-*\n")
-      exclude:close()
-    end
-    -- Build outputs must be ignored by the plugin itself; tracked modifications
-    -- would otherwise make the next update fail or silently discard changes.
-    U.check(
-      git(checkout, "status", "--porcelain", "--untracked-files=normal") == "",
-      package.id .. ": build left a dirty checkout; ignore generated outputs"
-    )
-    task:emit("staged", package.id)
-    return {
-      package = package,
-      commit = revision,
-      checkout = checkout,
-      temporary = temporary,
-      existed = exists,
-      previous_commit = previous_commit,
-    }
-  end
-
-  local function stage_all(packages, mode, lock)
-    local parent, next_index, remaining, failed = coroutine.running(), 1, math.min(concurrency, #packages), nil
-    if remaining == 0 then
-      return {}
-    end
-    local results = {}
-    for _ = 1, remaining do
-      local worker = coroutine.create(function()
-        while not failed and not task.cancel_requested and next_index <= #packages do
-          local index = next_index
-          next_index = index + 1
-          worker_ids[coroutine.running()] = packages[index].id
-          local ok, result = xpcall(function()
-            return stage(packages[index], mode, lock)
-          end, debug.traceback)
-          if not ok then
-            task:fail(packages[index].id, result)
-            failed = result
-          else
-            results[index] = result
-          end
-        end
-        remaining = remaining - 1
-        if remaining == 0 then
-          vim.schedule(function()
-            resume(parent)
-          end)
-        end
-      end)
-      resume(worker)
-    end
-    coroutine.yield()
-    U.check(not failed, tostring(failed))
-    task:check_cancelled()
-    return results
+    return {}
   end
 
   local function execute()
@@ -436,6 +82,7 @@ function M.run(manager, action, opts)
       packages = selected(manager, { ids = reviewed.ids })
     end
     transaction = require("plugin_tools.transaction").begin(manager, action, lock, staging, swaps)
+    runner.transaction = transaction
     task:select(action == "clean" and {} or packages)
     for _, p in ipairs(packages) do
       local components = {}
@@ -530,7 +177,9 @@ function M.run(manager, action, opts)
         task:emit("staged", p.id, { after_commit = lock.plugins[p.id].commit })
       end
     else
-      local results = stage_all(packages, action, lock)
+      local results = runner.map(packages, function(package)
+        return stage(package, action, lock)
+      end)
       task:seal()
       if action == "plan" then
         review = { ids = {}, entries = {}, rebuild = rebuild }
@@ -559,47 +208,7 @@ function M.run(manager, action, opts)
       for _, result in ipairs(results) do
         local p = result.package
         worker_ids[coroutine.running()] = p.id
-        if result.unchanged then
-          owned(p)
-          U.check(
-            git(p.dir, "status", "--porcelain", "--untracked-files=normal") == "",
-            "local modifications in " .. p.dir
-          )
-          U.check(git(p.dir, "rev-parse", "HEAD") == result.commit, p.id .. ": checkout changed during operation")
-        end
-        if not result.unchanged then
-          task:emit("publishing", p.id)
-          local swap = {
-            id = p.id,
-            source = p.source,
-            dir = p.dir,
-            before_commit = result.previous_commit,
-            after_commit = result.commit,
-          }
-          if result.existed then
-            -- Recheck after asynchronous work before moving an existing tree.
-            owned(p)
-            U.check(
-              git(p.dir, "status", "--porcelain", "--untracked-files=normal") == "",
-              "local modifications in " .. p.dir
-            )
-            U.check(
-              git(p.dir, "rev-parse", "HEAD") == result.previous_commit,
-              p.id .. ": checkout changed during operation"
-            )
-            swap.backup = result.temporary .. "/previous"
-            swaps[#swaps + 1] = swap
-            transaction:phase("publishing")
-            U.check(uv.fs_rename(p.dir, swap.backup), "cannot back up " .. p.dir)
-          else
-            U.check(not uv.fs_lstat(p.dir), "package directory appeared during operation: " .. p.dir)
-            swaps[#swaps + 1] = swap
-            transaction:phase("publishing")
-          end
-          U.check(uv.fs_rename(result.checkout, p.dir), "cannot publish " .. p.dir)
-          swap.published = true
-          transaction:save()
-        end
+        transaction:publish(result, git, task)
         lock.plugins[p.id] = { source = p.source, commit = result.commit }
       end
     end
@@ -634,42 +243,7 @@ function M.run(manager, action, opts)
       task.cancellable = false
       task:emit("rolling_back")
       if transaction then
-        local saved, err = pcall(transaction.phase, transaction, "rolling_back")
-        if not saved then
-          rollback_errors[#rollback_errors + 1] = tostring(err)
-        end
-      end
-      for i = #swaps, 1, -1 do
-        local swap = swaps[i]
-        if swap.published and uv.fs_lstat(swap.dir) then
-          local removed = vim.fn.delete(swap.dir, "rf")
-          if removed ~= 0 then
-            rollback_errors[#rollback_errors + 1] = "cannot remove " .. swap.dir
-          end
-        end
-        if swap.backup and uv.fs_lstat(swap.backup) then
-          local restored, err = uv.fs_rename(swap.backup, swap.dir)
-          if not restored then
-            rollback_errors[#rollback_errors + 1] = "backup retained at " .. swap.backup .. ": " .. tostring(err)
-          end
-        end
-      end
-      if transaction then
-        local restored, err = pcall(transaction.restore_lock, transaction)
-        if not restored then
-          rollback_errors[#rollback_errors + 1] = tostring(err)
-        end
-      end
-      if #rollback_errors == 0 then
-        if transaction then
-          local saved, err = pcall(transaction.phase, transaction, "rolled_back")
-          if not saved then
-            rollback_errors[#rollback_errors + 1] = tostring(err)
-          end
-        end
-        if #rollback_errors == 0 then
-          rollback_errors = clean_staging()
-        end
+        rollback_errors = transaction:rollback()
       end
       if #rollback_errors > 0 then
         keep_lock = true

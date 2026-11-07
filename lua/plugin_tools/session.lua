@@ -1,6 +1,14 @@
 local M = {}
 local source = debug.getinfo(1, "S").source:sub(2)
-local running_dir = vim.uv.fs_realpath(vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(source))))
+local module_dir = vim.fs.dirname(source)
+while
+  module_dir
+  and not (vim.fs.basename(module_dir) == "plugin_tools" and vim.fs.basename(vim.fs.dirname(module_dir)) == "lua")
+do
+  local parent = vim.fs.dirname(module_dir)
+  module_dir = parent ~= module_dir and parent or nil
+end
+local running_dir = module_dir and vim.uv.fs_realpath(vim.fs.dirname(vim.fs.dirname(module_dir)))
 local preserved = false
 
 -- Before replacing our own checkout, load its remaining modules from the old
