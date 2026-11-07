@@ -31,7 +31,7 @@ loader = replace(loader, 'local root = vim.fn.stdpath("data") .. "/plugin-tools"
 loader = replace(loader, "https://github.com/Jacky-Lzx/plugin-tools.nvim.git", source)
 loader = replace(
   loader,
-  "specs = {}, -- Add your plugin declarations here.",
+  "specs = {}",
   ("lockfile = %q, self = { source = %q }, specs = {{ id = 'dependency', source = %q }},"):format(
     lockfile,
     source,

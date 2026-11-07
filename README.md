@@ -20,8 +20,7 @@ For automatic first installation, put this in `init.lua`, before loading plugins
 
 ```lua
 local root = vim.fn.stdpath("data") .. "/plugin-tools"
-local path = root .. "/plugin-tools.nvim"
-local seed
+local path, seed = root .. "/plugin-tools.nvim", nil
 local ok, manager = pcall(function()
   if not vim.uv.fs_lstat(path) then
     seed = vim.fn.tempname()
@@ -29,19 +28,12 @@ local ok, manager = pcall(function()
       "git", "clone", "--filter=blob:none", "--",
       "https://github.com/Jacky-Lzx/plugin-tools.nvim.git", seed,
     }, { text = true }):wait(120000)
-    assert(result.code == 0, result.stderr or "plugin-tools: bootstrap clone failed")
+    assert(result.code == 0, result.stderr)
   end
-  return dofile((seed or path) .. "/bootstrap.lua").setup({
-    root = root,
-    specs = {}, -- Add your plugin declarations here.
-  })
+  return dofile((seed or path) .. "/bootstrap.lua").setup({ root = root, specs = {} })
 end)
-if seed then
-  vim.fn.delete(seed, "rf")
-end
-if not ok then
-  error(manager, 0)
-end
+if seed then vim.fn.delete(seed, "rf") end
+if not ok then error(manager, 0) end
 ```
 
 The temporary clone installs the managed copy and declared packages through the
