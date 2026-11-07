@@ -8,6 +8,25 @@
   "defaults": {},
   "cases": [
     {
+      "name": "help",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/help.lua"
+      ],
+      "files": [
+        "tests/help.lua"
+      ],
+      "timeout": 60
+    },
+    {
       "name": "auto_install",
       "suite": "unit",
       "command": [

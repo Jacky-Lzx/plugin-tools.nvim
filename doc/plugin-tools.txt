@@ -1,13 +1,19 @@
-*plugin-tools.txt*	Explicit plugin composition, package installation and runtime mounting.
+*plugin-tools.txt*	Plugin composition, installation and runtime mounting.
 
 ==============================================================================
 CONTENTS                                                        *plugin-tools*
 
   Quick start         |plugin-tools-quickstart|
+  Setup               |plugin-tools-setup|
+  Bootstrap           |plugin-tools-bootstrap|
+  Composition         |plugin-tools-composition|
   Commands            |plugin-tools-commands|
+  Panel keys          |plugin-tools-keys|
+  Help indexing       |plugin-tools-help|
   Options             |plugin-tools-options|
   Lua API             |plugin-tools-api|
   Typed configuration |plugin-tools-types|
+  Profiling           |plugin-tools-profile|
   Lifecycle           |plugin-tools-lifecycle|
   Plugin authoring    |plugin-tools-authoring|
   Troubleshooting     |plugin-tools-troubleshooting|
@@ -16,8 +22,8 @@ CONTENTS                                                        *plugin-tools*
 QUICK START                                          *plugin-tools-quickstart*
 
 Requires Neovim 0.11+. Git is required for package operations. Setup installs
-missing managed packages by default; auto_install=false disables this.
-To install plugin-tools.nvim itself, see |plugin-tools-bootstrap| and the
+missing managed packages by default; `auto_install=false` disables this. To
+install plugin-tools.nvim itself, see |plugin-tools-bootstrap| and the
 init.lua loader in README.md.
 
 >lua
@@ -32,14 +38,28 @@ package-manager examples are in README.md.
 TROUBLESHOOTING                                 *plugin-tools-troubleshooting*
 
 Check the minimum Neovim version and feature dependencies first. Run
-:checkhealth plugin_tools to inspect availability. Global mappings shown in
+`:checkhealth plugin_tools` to inspect availability. Global mappings shown in
 the README are configuration examples unless explicitly documented as plugin
 defaults. Keep one owner for each overridden UI or mapping.
 
 plugin-tools.nvim requires Neovim 0.11+; Git is needed for package operations.
 
+HELP INDEXING                                             *plugin-tools-help*
+
+Mounted plugins and plugin-tools itself get automatic help indexes, including
+local development checkouts with missing or outdated `doc/tags`. Indexes live
+under the Neovim cache directory, in plugin-tools/help/. Help jumps open the
+original documentation; plugin directories are never modified by this step.
+Read-only checkouts are supported.
+
+On startup, file names, sizes and timestamps determine whether an index needs
+rebuilding. Unchanged documents reuse the cached index. Document changes are
+picked up on the next startup. Packages with `mount="on-demand"` get their
+indexes when mounted; indexing does not activate them. Invalid help files or
+cache write failures produce a warning without preventing plugin startup.
+
 SETUP                                                     *plugin-tools-setup*
->
+>lua
   vim.opt.rtp:prepend('/path/to/plugin-tools.nvim')
   require('plugin_tools').setup({
     specs = {
@@ -47,58 +67,62 @@ SETUP                                                     *plugin-tools-setup*
     },
   })
 <
-Call setup during init.lua, before native plugin loading. auto_install=true
-installs absent managed packages before mounting or configuration, honoring
-locked revisions. Existing checkouts are not inspected with Git or updated.
-Installation completes in this startup, before native plugin loading. Missing
-external dir checkouts or component subdirectories are not installed.
+Call `setup()` during init.lua, before native plugin loading.
+`auto_install=true` installs absent managed packages before mounting or
+configuration, honoring locked revisions. Existing checkouts are not inspected
+with Git or updated. Installation completes in this startup, before native
+plugin loading. Missing external `dir` checkouts or component subdirectories
+are not installed.
 
-auto_install is a boolean, defaults to true, and applies to setup() and to
-new(options):start(). new() alone never installs or starts anything. With
-auto_install=false, use install():wait() explicitly and restart before normal
-startup. strict=false permits startup with remaining missing directories;
-it does not suppress automatic installation errors. Failed installations stop
-startup before mounting or configuration and retain transaction diagnostics.
-When all packages are present, startup does not run Git or read the lockfile.
-If startup fails after manager creation, status, health checks and package
-commands remain available; initialization errors are retained and are not
-automatically retried.
+`auto_install` is a boolean, defaults to `true`, and applies to `setup()` and
+to `new(options):start()`. `new()` alone never installs or starts anything.
+With `auto_install=false`, use `install():wait()` explicitly and restart
+before normal startup. `strict=false` permits startup with remaining missing
+directories; it does not suppress automatic installation errors. Failed
+installations stop startup before mounting or configuration and retain
+transaction diagnostics. When all packages are present, startup does not run
+Git or read the lockfile. If startup fails after manager creation, status,
+health checks and package commands remain available; initialization errors are
+retained and are not automatically retried.
 
 BOOTSTRAP                                             *plugin-tools-bootstrap*
 
-The standalone dofile(path .. "/bootstrap.lua").setup(options) entry point
+The standalone `dofile(path .. "/bootstrap.lua").setup(options)` entry point
 returns the default manager. Call it during init.lua before loading any
-plugin_tools modules, instead of calling plugin_tools.setup() separately.
-The README loader obtains a temporary seed only if root/plugin-tools.nvim is
+`plugin_tools` modules, instead of calling `plugin_tools.setup()` separately.
+The README loader obtains a temporary seed only if `root/plugin-tools.nvim` is
 absent, and removes that seed on success or failure.
 
-options accepts the ordinary manager options and a bootstrap-only self table:
-  self.source   Git source; defaults to "Jacky-Lzx/plugin-tools.nvim"
-  self.version  Optional branch, tag, commit or ref; defaults to remote HEAD
+`options` accepts the ordinary manager options and a bootstrap-only `self`
+table:
+  `self.source`   Git source; defaults to `"Jacky-Lzx/plugin-tools.nvim"`
+  `self.version`  Optional branch, tag, commit or ref; defaults to remote HEAD
 
-An existing lockfile takes precedence over self.version during installation.
+An existing lockfile takes precedence over `self.version` during installation.
 Update explicitly to move to the selected version.
 
-The id "plugin-tools.nvim" is reserved in bootstrap declarations, including
-children. Bootstrap prepends this managed package with dev=false and
-config=false; global dev overrides do not redirect it to an external checkout.
-Input options are copied. self is consumed before manager creation.
+The `id` `"plugin-tools.nvim"` is reserved in bootstrap declarations,
+including `children`. Bootstrap prepends this managed package with `dev=false`
+and `config=false`; global `dev` overrides do not redirect it to an external
+checkout. Input options are copied. `self` is consumed before manager
+creation.
 
-If the self package is absent, bootstrap explicitly installs itself and, by
-default, all selected packages through new(options):install():wait(), honoring
-the lockfile, before starting the installed version. It clears seed modules
-and restores the runtimepath before loading the managed copy. Errors are
-raised; an interrupted transaction may need recovery. The seed and installed
-versions must both
-support this bootstrap entry point. Existing unowned checkouts are not adopted.
-With auto_install=false, the initial seed installs only plugin-tools.nvim.
+If the `self` package is absent, bootstrap explicitly installs itself and, by
+default, all selected packages through `new(options):install():wait()`,
+honoring the lockfile, before starting the installed version. It clears seed
+modules and restores the runtimepath before loading the managed copy. Errors
+are raised; an interrupted transaction may need recovery. The seed and
+installed versions must both support this bootstrap entry point. Existing
+unowned checkouts are not adopted. With `auto_install=false`, the initial seed
+installs only plugin-tools.nvim.
 
-If the self package exists, bootstrap sets up the manager with the same
-auto_install behavior: later missing packages are installed by default; no Git
-or lockfile reads occur if all packages are present. Self updates use the same
-plan/apply, update, restore and freeze operations and ownership checks as other
-packages. The running session keeps the old Lua modules until restart. Do not
-manually clear package.loaded entries to reload the updated manager in place.
+If the `self` package exists, bootstrap sets up the manager with the same
+`auto_install` behavior: later missing packages are installed by default; no
+Git or lockfile reads occur if all packages are present. Self updates use the
+same plan/apply, update, restore and freeze operations and ownership checks as
+other packages. The running session keeps the old Lua modules until restart.
+Do not manually clear `package.loaded` entries to reload the updated manager
+in place.
 
 PLUGIN AUTHORING                                      *plugin-tools-authoring*
 
@@ -109,107 +133,143 @@ documented in |plugin-tools-composition| and
 
 COMPOSITION                                         *plugin-tools-composition*
 
-children contains nested declarations. source/dir identifies an independent
-package; a child without either shares its parent's package owner. path
-selects a component directory relative to that owner. All nodes have a global
-id. Repeated compatible declarations merge options and share installation.
+`children` contains nested declarations. `source` / `dir` identifies an
+independent package; a child without either shares its parent's package owner.
+`path` selects a component directory relative to that owner. All nodes have a
+global `id`. Repeated compatible declarations merge options and share
+installation.
 
-origin optionally labels a declaration's configuration module/file.
-explain(id) returns declarations in merge order and option_history with key
-paths and replace/clear assignments. Labels inherit through children; manifest
-positions are always recorded. Conflicts identify both sources. History stores
-metadata, not extra copies of option values; opts contains the final merged
-values.
+`origin` optionally labels a declaration's configuration module/file.
+`explain(id)` returns declarations in merge order and `option_history` with
+key paths and `replace` / `clear` assignments. Labels inherit through
+`children`; manifest positions are always recorded. Conflicts identify both
+sources. History stores metadata, not extra copies of option values; `opts`
+contains the final merged values.
 
-Ordinary roots default to start=true; children and deferred/ft nodes default
-to start=false. main names the module whose setup(opts) runs on activation.
-config(ctx) replaces setup; config=false suppresses setup. enabled=false omits
-that contribution and its subtree. There is no separate bootstrap phase.
-Plugins own commands, APIs and feature events; personal mappings and adapters
-belong in config(ctx). Keep setup lightweight and defer expensive internals
-inside the plugin.
+Ordinary roots default to `start=true`; children, deferred and `ft` nodes
+default to `start=false`. `main` names the module whose `setup(opts)` runs on
+activation. `config(ctx)` replaces setup; `config=false` suppresses setup.
+`enabled=false` omits that contribution and its subtree. There is no separate
+bootstrap phase. Plugins own commands, APIs and feature events; personal
+mappings and adapters belong in `config(ctx)`. Keep setup lightweight and
+defer expensive internals inside the plugin.
 
-dependencies contains IDs or {id='other', optional=true}. It guarantees
-declared availability, without initialization or activation ordering. after
+`dependencies` contains IDs or `{id='other', optional=true}`.
+It guarantees
+declared availability, without initialization or activation ordering. `after`
 explicitly requires initialization of other nodes first. Optional references
 may be absent.
 
-ctx provides id, dir, opts and dependency-only has(id), mount(id),
-activate(id), use(id) closures. use initializes the target once and returns
-require(main). The plugin decides when to call it. Context functions use dot
-calls; managers use colon calls.
+`ctx` provides `id`, `dir`, `opts` and dependency-only `has(id)`, `mount(id)`,
+`activate(id)`, `use(id)` closures. `use()` initializes the target once and
+returns `require(main)`. The plugin decides when to call it. Context functions
+use dot calls; managers use colon calls.
 
-start=false controls initialization only. With the default mount='startup',
-all selected runtime roots remain available to native loading.
+`start=false` controls initialization only. With the default
+`mount='startup'`, all selected runtime roots remain available to native
+loading.
 
-A package owner may set mount='on-demand' to keep its runtime off runtimepath
-until mount(id), activate(id), use(id), or a matching ft triggers it. activate
-and use also initialize the target once. mount exposes runtime files and
-sources native plugin scripts without calling setup. Same-directory children
-share mounting but retain separate initialization; path components mount their
-owner and component roots. dependencies never mount or initialize their
-targets implicitly; request resources through ctx.mount or features through
-ctx.use.
+A package owner may set `mount='on-demand'` to keep its runtime off
+runtimepath until `mount(id)`, `activate(id)`, `use(id)`, or a matching `ft`
+triggers it. `activate()` and `use()` also initialize the target once.
+`mount()` exposes runtime files and sources native plugin scripts without
+calling setup. Same-directory children share mounting but retain separate
+initialization; `path` components mount their owner and component roots.
+`dependencies` never mount or initialize their targets implicitly; request
+resources through `ctx.mount` or features through `ctx.use`.
 
-ft={'tex','plaintex'} contains literal filetypes. Matching existing and future
-buffers initialize the node once, honoring after. An explicit start=true with
-ft is rejected. The plugin must attach the current buffer and subsequent
-buffers; the manager does not replay FileType. Keep filetype detection and
-settings needed by native ftplugins available early.
+`ft={'tex','plaintex'}` contains literal filetypes. Matching existing and
+future buffers initialize the node once, honoring `after`. An explicit
+`start=true` with `ft` is rejected. The plugin must attach the current buffer
+and subsequent buffers; the manager does not replay `FileType`. Keep filetype
+detection and settings needed by native ftplugins available early.
 
 Late mounts source plugin/ Vim files, then Lua files, followed by
-after/plugin/ Vim and Lua files, before configuration. loadplugins is honored.
-Temporary exact SourceCmd guards prevent repeat native startup sourcing before
-VimEnter. Native source errors are retained; missing
-FileType/ftdetect/ftplugin phases are not replayed. Retain startup mounting
+after/plugin/ Vim and Lua files, before configuration. 'loadplugins' is
+honored. Temporary exact `SourceCmd` guards prevent repeat native startup
+sourcing before `VimEnter`. Native source errors are retained; missing
+`FileType`/ftdetect/ftplugin phases are not replayed. Retain startup mounting
 for plugins requiring unadapted native phases. The manager does not intercept
-require() or unload initialized modules.
+`require()` or unload initialized modules.
 
 COMMANDS                                               *plugin-tools-commands*
                                                                 *:PluginTools*
 
-:PluginTools [status]          Show each plugin's state and directory.
-:PluginTools profile           Show startup stages and plugin timing.
-:PluginTools log               Show the latest operation's process/phase log.
-:PluginTools explain {id}      Explain ownership, users, configuration and
-state. :PluginTools install [ids...]  Install missing packages, honoring the
-lockfile.
-:PluginTools update [ids...]   Update selected packages and lock revisions.
-:PluginTools plan [ids...]     Preview exact update commits and required
-builds.
-:PluginTools apply             Apply the latest session-local reviewed plan.
-:PluginTools restore [ids...]  Restore selected packages to locked commits.
-:PluginTools freeze [ids...]   Record selected current checkout revisions.
-:PluginTools clean             Preview unreferenced owned checkouts.
-:PluginTools clean --apply     Remove those checkouts and lock entries.
-:PluginTools recover           Preview interrupted transaction recovery.
-:PluginTools recover --apply   Apply validated rollback or committed cleanup.
+  Command ~
+  `:PluginTools [status]`
+      Show each plugin's state and directory.
+  `:PluginTools profile`
+      Show startup stages and plugin timing.
+  `:PluginTools log`
+      Show the latest operation's process/phase log.
+  `:PluginTools explain {id}`
+      Explain ownership, users, configuration and state.
+  `:PluginTools install [ids...]`
+      Install missing packages, honoring the lockfile.
+  `:PluginTools update [ids...]`
+      Update selected packages and lock revisions.
+  `:PluginTools plan [ids...]`
+      Preview exact update commits and required builds.
+  `:PluginTools apply`
+      Apply the latest session-local reviewed plan.
+  `:PluginTools restore [ids...]`
+      Restore selected packages to locked commits.
+  `:PluginTools rebuild [ids...]`
+      Rebuild selected packages at locked revisions.
+  `:PluginTools freeze [ids...]`
+      Record selected current checkout revisions.
+  `:PluginTools clean`
+      Preview unreferenced owned checkouts.
+  `:PluginTools clean --apply`
+      Remove those checkouts and lock entries.
+  `:PluginTools recover`
+      Preview interrupted transaction recovery.
+  `:PluginTools recover --apply`
+      Apply validated rollback or committed cleanup.
+  `:PluginTools cancel`
+      Request cancellation of the current operation before publication.
 
 The centered rounded panel adapts columns to the window and follows the
-current colorscheme. j/k move between plugins, / filters, Space selects, Enter
-shows compact details, o expands full configuration, ? shows help, and l
-toggles logs. P opens startup profiling; t sorts by time/name. r refreshes and
-q/Escape closes. u/i/s/f operate on selected nodes or the cursor node; c
-previews cleanup and C applies it. Closing detaches progress observers. The
-panel is loaded only on demand. manager:open() also opens it. Children form a
-tree in the plugin list; filtering retains their ancestors. Shared nodes
-appear once, with all parents in details. Profiles stay flat and show parent
-labels to preserve time/name sorting. Dependencies do not nest rows. Enter
-continues to toggle details. Selection and cursor survive resize/view changes.
-PluginToolsReady/Active/Warning/ Error color states;
-PluginToolsSelected/SelectedLine show selection. Override those groups or
-PluginToolsNormal/Border/Title/CursorLine in your theme. p previews selected
-updates and a applies the reviewed commits. R previews recovery. Previews
-resolve Git refs but execute no builds or publication.
+current colorscheme. The panel is loaded only on demand. `manager:open()` also
+opens it. Children form a tree in the plugin list; filtering retains their
+ancestors. Shared nodes appear once, with all parents in details. Profiles
+stay flat and show parent labels to preserve time/name sorting. Dependencies
+do not nest rows. Selection and cursor survive resize/view changes. Closing
+detaches progress observers. See |plugin-tools-keys| for panel shortcuts and
+|plugin-tools-reference-lua-api-and-commands| for highlight groups.
+
+PANEL KEYS                                                *plugin-tools-keys*
+
+  Key                 Action ~
+  `j` / `k`               Move between plugins.
+  `/`                   Filter IDs and directories.
+  <Space>             Select the current node.
+  <CR>                Toggle compact details.
+  `o`                   Toggle full configuration and merge history.
+  `?`                   Show all shortcuts.
+  `l`                   Toggle operation logs.
+  `P`                   Toggle startup profiling.
+  `t`                   Sort by time or name.
+  `I`                   Toggle disabled and unselected optional declarations.
+  `r`                   Refresh and attach to active tasks.
+  `u` / `i`               Update / install selected nodes or cursor node.
+  `s` / `f`               Restore / freeze selected nodes or cursor node.
+  `p` / `a`               Preview updates / apply the reviewed commits.
+  `c` / `C`               Preview / apply cleanup to the whole manifest.
+  `R`                   Preview recovery.
+  `x`                   Request cancellation before publication.
+  `q` / <Esc>           Close the panel.
+
+Previews resolve Git refs but execute no builds or publication.
 
 Git operations are asynchronous. Updates stage all builds before publication;
 caught errors roll back replaced checkouts. Dirty or unowned checkouts are
-protected. Local dir/dev checkouts are never updated or cleaned. Restart after
-changing package files. See README.md for transaction and crash recovery
+protected. Local `dir` / `dev` checkouts are never updated or cleaned. Restart
+after changing package files. See README.md for transaction and crash recovery
 limits.
 
 API                                                         *plugin-tools-api*
->
+>lua
   local m = require('plugin_tools').new(options)
   m:start()
   m:mount(id)
@@ -221,74 +281,79 @@ API                                                         *plugin-tools-api*
   local task = m:install({ids = {'my-plugin'}})
   local result, err = task:wait(300000)
 <
-install, update, restore, freeze, clean, plan and recover return tasks. wait
-pumps the event loop; its timeout does not cancel the task. An
-on_complete(result, err) option receives completion without waiting.
+`install()`, `update()`, `restore()`, `freeze()`, `clean()`, `plan()` and
+`recover()` return tasks. `wait()` pumps the event loop; its timeout does not
+cancel the task. An `on_complete(result, err)` option receives completion
+without waiting.
 
-on_progress(event) reports package phases and committed counts.
-task:subscribe(fn) returns an unsubscribe function; task:snapshot() copies
-current progress. Successful results include details with
-before_commit/after_commit and phases. task.report also retains structured
-failure information; task.events keeps the last 500 phase/process records.
-manager.last_operation retains the latest task.
+`on_progress(event)` reports package phases and committed counts.
+`task:subscribe(fn)` returns an unsubscribe function; `task:snapshot()` copies
+current progress. Successful results include `details` with
+`before_commit` / `after_commit` and phases. `task.report` also retains
+structured failure information; `task.events` keeps the last 500 phase/process
+records. `manager.last_operation` retains the latest task.
 
-plan():wait() returns a report usable with update({plan=report}) in the same
-manager instance. Apply pins reviewed commits and rejects changed
-configuration or checkouts. Plans do not survive a restart. recover() previews
-by default; recover({dry_run=false}) applies recovery. Journal records and
-backups survive caught recovery failures. Recovery refuses live
+`plan():wait()` returns a report usable with `update({plan=report})` in the
+same manager instance. Apply pins reviewed commits and rejects changed
+configuration or checkouts. Plans do not survive a restart. `recover()`
+previews by default; `recover({dry_run=false})` applies recovery. Journal
+records and backups survive caught recovery failures. Recovery refuses live
 owners/children, changed or dirty checkouts, mismatched ownership, unsafe
 paths and changed lockfiles. Interrupted recovery claims and legacy locks need
 manual inspection; see README.md.
 
-Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
-auto_install=true, strict=true, commands=true, concurrency=4,
-git_timeout=120000, profile=true.
+Options: `specs`, `root`, `lockfile`, `dev={path=...,fallback=true}`,
+`url_format`, `auto_install=true`, `strict=true`, `commands=true`,
+`concurrency=4`, `git_timeout=120000`, `profile=true`.
 
 TYPED CONFIGURATION                                   *plugin-tools-types*
 
-setup()/new() options, plugin declarations, contexts, manager methods and tasks
-include LuaDoc signatures. For a configuration module, annotate its returned table:
+`setup()` / `new()` options, plugin declarations, contexts, manager methods
+and tasks include LuaDoc signatures. For a configuration module, annotate its
+returned table:
 >lua
   ---@module "plugin_tools"
   ---@type plugin_tools.BootstrapOptions
   local opts = { auto_install = true, specs = {} }
   return opts
 <
-Use plugin_tools.Options for direct setup()/new() without bootstrap's self, and
-plugin_tools.Spec[] for declaration lists. LuaLS must index this plugin's lua/
-directory (add it to Lua.workspace.library if necessary). Plugin-specific opts
-remain open tables; use the individual plugin's option type for those fields.
+Use `plugin_tools.Options` for direct `setup()` / `new()` without bootstrap's
+`self`, and `plugin_tools.Spec[]` for declaration lists. LuaLS must index this
+plugin's lua/ directory (add it to `Lua.workspace.library` if necessary).
+Plugin-specific `opts` remain open tables; use the individual plugin's option
+type for those fields.
 
 PROFILING                                               *plugin-tools-profile*
 
-Lightweight timing is on by default; profile=false disables collection. P or
-:PluginTools profile shows stages and plugins, slowest startup first. t
+Lightweight timing is on by default; `profile=false` disables collection. `P`
+or `:PluginTools profile` shows stages and plugins, slowest startup first. `t`
 toggles time/name sorting. STARTUP is exclusive configuration plus attributed
 native source time; INIT and SCRIPTS separate those costs. LATER is managed
-activation after startup. Enter shows inclusive/exclusive timings and script
+activation after startup. <CR> shows inclusive/exclusive timings and script
 files. Shared roots are charged once, to their package.
 
 Stages cover resolution, runtimepath mounting, initialization, emitted native
-SourcePre/SourcePost spans and other work. Total is resolve time plus start()
-through the beginning of VimEnter, excluding earlier init/spec construction
-and any gap between new() and start(). It is not whole-process startup time.
-After VimEnter, setup reports manager startup only. Source observers are
-removed at VimEnter or startup failure; startup totals then remain fixed.
-Mounting and manager elapsed timings include automatic installation when
-packages are missing.
+`SourcePre` / `SourcePost` spans and other work. Total is resolve time plus
+`start()` through the beginning of `VimEnter`, excluding earlier init/spec
+construction and any gap between `new()` and `start()`. It is not
+whole-process startup time. After `VimEnter`, setup reports manager startup
+only. Source observers are removed at `VimEnter` or startup failure; startup
+totals then remain fixed. Mounting and manager elapsed timings include
+automatic installation when packages are missing.
 
 Some sources inside non-nested autocommands emit no source events; those and
-other unmeasured startup work appear under Other startup work. No require()
+other unmeasured startup work appear under Other startup work. No `require()`
 wrappers are installed. Plugin-internal first-use work is not measured unless
 it runs inside a managed activation. Interrupted source samples are omitted.
-manager:profile() returns copied {timings, plugins}. states retain duration_ms
-(inclusive activation), self_ms, startup_config_ms, scripts_ms, startup_ms,
-deferred_ms, deferred_scripts_ms, mount_ms and source samples where measured.
-explain(id) also reports mount policy, filetypes, state and activation reason.
-Operation options: ids, concurrency, timeout, on_complete; clean accepts
-dry_run (default true) and operates on the whole manifest. Check :checkhealth
-plugin_tools.
+`manager:profile()` returns copied `{timings, plugins}`.
+States retain
+`duration_ms` (inclusive activation), `self_ms`, `startup_config_ms`,
+`scripts_ms`, `startup_ms`, `deferred_ms`, `deferred_scripts_ms`, `mount_ms`
+and source samples where measured. `explain(id)` also reports mount policy,
+filetypes, state and activation reason. Operation options: `ids`,
+`concurrency`, `timeout`, `on_complete`; `clean()` accepts `dry_run` (default
+`true`) and operates on the whole manifest. Check
+`:checkhealth plugin_tools`.
 
 ==============================================================================
 SPECIFICATION                                           *plugin-tools-options*
@@ -297,14 +362,14 @@ SPECIFICATION                                           *plugin-tools-options*
 Every node has a required explicit `id` containing letters, digits, `_`, `-`,
 or `.` and beginning with a letter or digit. Unknown fields are rejected.
 
-  Field — Meaning
+  Field — Meaning ~
   `source` — Git URL, local Git repository path, or `owner/repository`
       shorthand
   `origin` — Optional declaration label, such as a configuration module or
       project file
   `dir` — External checkout, never installed, updated, frozen, or deleted
-  `dev` — Prefer `dev.path/id`; fall back to `source` unless `dev.fallback =
-      false`
+  `dev` — Prefer `dev.path/id`; fall back to `source` unless
+      `dev.fallback = false`
   `version` — Branch, tag, commit, or explicit Git ref; no semver solver
   `children` — Nested node declarations
   `path` — Component runtime directory relative to its package owner, not
@@ -346,7 +411,10 @@ To enable a plugin only in selected projects, keep its complete declaration
 optional:
 
 >lua
-    { id = "notes", source = "author/notes", optional = true, opts = { border = "rounded" } }
+    {
+      id = "notes", source = "author/notes", optional = true,
+      opts = { border = "rounded" },
+    }
 <
 
 Have the host configuration securely read a project manifest and append its
@@ -363,10 +431,10 @@ calls, or installation tasks. Dependencies and `after` references do not
 select optional plugins. A dormant subtree cannot select itself through its
 children. Once selected, all enabled contributions merge in their original
 declaration order; default source, configuration and options remain available.
-Predicates are evaluated once for each reachable declaration. `enabled =
-false` still discards that contribution; it is not a defaults registry. An
-optional declaration's `optional` flag is independent of optional dependency
-references.
+Predicates are evaluated once for each reachable declaration.
+`enabled = false` still discards that contribution; it is not a defaults
+registry. An optional declaration's `optional` flag is independent of optional
+dependency references.
 
 The manager does not discover or execute project files. Selection happens
 before startup mounting; changing projects in an existing session does not
@@ -419,29 +487,38 @@ Inspection includes reachable disabled and unselected optional declarations:
 `explain(id)` returns their `disabled` or `unselected` state and declaration
 origins. Dormant children remain unevaluated and are not discovered.
 `status({include_inactive=true})` includes these records; plain `status()`
-continues to return selected nodes only. Press I in the panel to toggle them.
-Inactive records have `selected=false`, an empty directory and no runtime.
-Activation state includes a `trigger` with kind, parent/action or filetype
-where applicable, and the activation chain. First activation retains its cause.
+continues to return selected nodes only. Press `I` in the panel to toggle
+them. Inactive records have `selected=false`, an empty directory and no
+runtime. Activation state includes a `trigger` with kind, parent/action or
+filetype where applicable, and the activation chain. First activation retains
+its cause.
 
 `diagnostics()` returns issues with level, message and advice. It inspects
-operation locks, recovery journals, prior failures and managed checkout/lockfile
-consistency. `:checkhealth plugin_tools` renders the same issues. Explicit
-inspection may run bounded, local Git commands; it never fetches or repairs.
-Checkout drift checks are skipped while an operation lock exists. Startup and
-`status()` do not run these checks.
+operation locks, recovery journals, prior failures and managed
+checkout/lockfile consistency. `:checkhealth plugin_tools` renders the same
+issues. Explicit inspection may run bounded, local Git commands; it never
+fetches or repairs. Checkout drift checks are skipped while an operation lock
+exists. Startup and `status()` do not run these checks.
 
 Synchronous inspection/runtime methods:
 
 >lua
-    manager:has(id)       -- Declared and not known missing; no require(), Git, or source scan
-    manager:mount(id)     -- Expose runtime and native scripts without running setup
-    manager:activate(id)  -- Configure once; explicit after prerequisites are activated first
-    manager:use(id)       -- Activate and return require(main); main is required
-    manager:status()      -- Copies of registered/mounted/ready/missing/failed states
-    manager:open()        -- Open the status panel (UI module loads on demand)
-    manager:profile()     -- Copied startup stages and per-plugin timing/state snapshot
-    manager:explain(id)   -- Package, source, parents, users, dependencies, configuration, state
+    -- Inspect availability without require(), Git, or a source scan.
+    manager:has(id)
+    -- Expose runtime and native scripts without running setup.
+    manager:mount(id)
+    -- Configure once, activating explicit after prerequisites first.
+    manager:activate(id)
+    -- Activate and return require(main); main is required.
+    manager:use(id)
+    -- Copy registered/mounted/ready/missing/failed states.
+    manager:status()
+    -- Open the status panel (UI module loads on demand).
+    manager:open()
+    -- Copy startup stages and per-plugin timing/state snapshots.
+    manager:profile()
+    -- Explain package, source, parents, users, configuration and state.
+    manager:explain(id)
 <
 
 A failed configuration is retained as `failed` and is not automatically
@@ -454,17 +531,18 @@ Async package methods return a task with `done`, `result`, `error`, and
 not cancel or unlock the ongoing operation. Inspect the task or wait again.
 `task:cancel()` requests cancellation and returns true once, or false when
 already cancelled, finished or publishing/rolling back. `:PluginTools cancel`
-and panel key x request the same action. Cancellation stops new staging work,
-terminates active managed processes, waits for workers, then rolls back and
-cleans staging. A cancelled wait returns `nil, error`; `task.report.status`
-is `cancelled`, unless rollback failed and recovery is required. Snapshots
-include `cancellable`, `cancel_requested`, `cancelled`, and `recovery_required`.
-Publication and applied recovery cannot be cancelled; allow them to finish.
-On Unix each managed command has its own process group, which cancellation
-kills including ordinary children. Windows terminates direct child processes.
-Build functions receive `ctx.cancelled()` for cooperative checks; synchronous
-Lua work and processes started independently by callbacks cannot be interrupted
-by this API. Build callbacks should not leave detached background workers.
+and panel key `x` request the same action. Cancellation stops new staging
+work, terminates active managed processes, waits for workers, then rolls back
+and cleans staging. A cancelled wait returns `nil, error`;
+`task.report.status` is `cancelled`, unless rollback failed and recovery is
+required. Snapshots include `cancellable`, `cancel_requested`, `cancelled`,
+and `recovery_required`. Publication and applied recovery cannot be cancelled;
+allow them to finish. On Unix each managed command has its own process group,
+which cancellation kills including ordinary children. Windows terminates
+direct child processes. Build functions receive `ctx.cancelled()` for
+cooperative checks; synchronous Lua work and processes started independently
+by callbacks cannot be interrupted by this API. Build callbacks should not
+leave detached background workers.
 
 `on_progress(event)` receives isolated phase events while an operation runs:
 `checking`, `cloning`, `checkout`, `submodules`, `building`, `helptags`,
@@ -474,14 +552,14 @@ an observer and returns an unsubscribe function; observer errors never abort
 package work. `task:snapshot()` returns copied per-package progress, including
 `before_commit`, `after_commit`, build requirements and failure details.
 Counts advance after commit, or after a preview validates all selected
-packages. `task.report` is available even on failure, with a structured `{ id,
-phase, message }` error; `wait()` keeps returning `nil, error` on failure.
-Successful results retain the `packages` ID list and add `details`.
+packages. `task.report` is available even on failure, with a structured
+`{ id, phase, message }` error; `wait()` keeps returning `nil, error` on
+failure. Successful results retain the `packages` ID list and add `details`.
 `manager.last_operation` retains the latest task, whose `events` contain the
 last 500 phase/process records (each stdout/stderr record is limited to 16
 KiB).
 
-  Method / command — Behavior
+  Method / command — Behavior ~
   `install()` / `:PluginTools install [ids...]` — Install missing packages at
       locked revision, or declared version; verify existing versions against
       the lock
@@ -509,9 +587,17 @@ KiB).
   `recover({dry_run=false})` / `:PluginTools recover --apply` — Apply
       validated rollback or finish committed cleanup
 
-Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000,
-on_progress = function(event) ... end, on_complete = function(result, err) ...
-end }`. IDs select package owners, so selecting a component selects its shared
+Operations accept an options table:
+>lua
+    {
+      ids = { "my-plugin" },
+      concurrency = 4,
+      timeout = 120000,
+      on_progress = function(event) end,       -- Handle progress.
+      on_complete = function(result, err) end, -- Handle completion.
+    }
+<
+IDs select package owners, so selecting a component selects its shared
 checkout. Clean uses the whole graph and does not accept IDs. Manager options
 `concurrency` and `git_timeout` supply the defaults. `timeout` bounds each
 process. `rebuild = true` forces checkout/build/publication for install,
@@ -529,15 +615,16 @@ required modules are not unloaded. Commands report completion asynchronously.
 
 `:PluginTools` opens a centered, rounded floating panel with a searchable
 scratch buffer, status summary and theme-aware state colors. Columns adapt to
-the window; long paths shorten in the list and wrap in details. `j`/`k` move
-between plugins. `/` filters IDs and directories, Space selects nodes, Enter
+the window; long paths shorten in the list and wrap in details. `j` / `k` move
+between plugins. `/` filters IDs and directories, <Space> selects nodes, <CR>
 shows compact details, `o` expands the complete configuration/merge history,
 and `?` shows all shortcuts. `l` switches between status and operation logs.
 `u`, `i`, `s`, and `f` update, install, restore, or freeze the selection (or
 the node under the cursor). Components select their shared package
 automatically. `c` previews cleanup and `C` applies cleanup to the complete
 graph. `p` previews an update and `a` applies the reviewed commits. `R`
-previews recovery. `r` refreshes; `q` or Escape closes. The panel subscribes
+previews recovery. `r` refreshes; `q` or <Esc> closes. See |plugin-tools-keys|
+for the complete shortcut list. The panel subscribes
 to active tasks and releases its subscription when closed; it adds no startup
 timers or UI dependencies. Operations started through the Lua API outside the
 panel can be attached with `r`. Command completion includes IDs.

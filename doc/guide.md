@@ -63,6 +63,12 @@ Then start Neovim normally. Alternatively, also set `strict = false`, run
 reported as `missing`, and skipped in permissive mode. Strict startup is the
 default and checks every directory before changing `runtimepath`.
 
+Mounted plugins get automatic cached help indexes, including local development
+checkouts and plugin-tools itself. Missing or stale `doc/tags` files do not need
+manual regeneration. Help opens the original documentation; the manager writes
+only to Neovim's cache directory. Unchanged documents reuse the cache, and changes
+are detected on the next startup. See `:help plugin-tools-help` for details.
+
 An automatic installation failure stops startup before mounting or configuration,
 even with `strict = false`. The transaction rolls back caught failures; the
 default manager's status, logs and commands remain available for diagnosis.

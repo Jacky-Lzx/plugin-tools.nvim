@@ -2,6 +2,7 @@ local U = require("plugin_tools.util")
 local Runtime = {}
 Runtime.__index = Runtime
 local sequence = 0
+local manager_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
 
 function Runtime.new(manager)
   local self = setmetatable({ manager = manager, roots = {}, order = {} }, Runtime)
@@ -22,6 +23,9 @@ function Runtime:_paths()
   local paths, afters, managed, seen = {}, {}, {}, {}
   for _, root in ipairs(self.order) do
     if root.mounted then
+      if root.help then
+        paths[#paths + 1], managed[root.help] = root.help, true
+      end
       paths[#paths + 1], managed[root.dir] = root.dir, true
       if root.after then
         afters[#afters + 1], managed[root.after] = root.after, true
@@ -52,6 +56,9 @@ function Runtime:_paths()
     end
   end
   for _, path in ipairs(runtime) do
+    if path == manager_root and self.help then
+      append(self.help)
+    end
     local after = path:match("[/\\]after$") ~= nil
     if path == vim.env.VIMRUNTIME or after then
       insert_roots()
@@ -70,6 +77,10 @@ end
 
 function Runtime:_mark(root)
   root.mounted = true
+  if not root.help_checked then
+    root.help_checked = true
+    root.help = require("plugin_tools.help").prepare(root.dir)
+  end
   root.after = U.directory(root.dir .. "/after") and root.dir .. "/after" or nil
   for _, id in ipairs(root.ids) do
     local state = self.manager.states[id]
@@ -97,6 +108,7 @@ function Runtime:check()
 end
 
 function Runtime:mount_startup()
+  self.help = require("plugin_tools.help").prepare(manager_root)
   local existing = {}
   for _, path in ipairs(U.runtime_paths()) do
     existing[path] = true
