@@ -475,6 +475,7 @@
         "stylua",
         "--check",
         "bootstrap.lua",
+        "doc/screenshots",
         "lua",
         "tests",
         "examples"

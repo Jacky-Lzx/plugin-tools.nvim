@@ -9,6 +9,8 @@ Explicit plugin composition, package installation and runtime mounting.
 - Keep package management separate from feature initialization.
 - Bootstrap from init.lua and manage plugin-tools.nvim's own locked revision.
 
+![Plugin hierarchy, selection and activation states in the Plugin Tools panel](doc/screenshots/overview.png)
+
 ## Requirements
 
 Neovim **0.11+**. Git is required for installation and updates. Startup installs
@@ -73,6 +75,25 @@ require("plugin_tools").setup({ specs = {} })
 :PluginTools explain {id}
 ```
 
+<details>
+<summary>Startup profiling, dependency details and update previews</summary>
+
+**See where startup time goes.**
+
+![Startup stages and per-plugin initialization, script and on-demand timings](doc/screenshots/profile.png)
+
+**Understand why a plugin is active and where it was declared.**
+
+![Plugin details showing activation causes, package ownership and declared dependencies](doc/screenshots/details.png)
+
+**Review exact commits and change counts before applying an update.**
+
+![An update plan with locked and proposed revisions and Git history summaries](doc/screenshots/update-plan.png)
+
+</details>
+
+Captured from an isolated offline demo. [Recreate the screenshots](doc/screenshots/README.md).
+
 ## Documentation
 
 - [Complete reference](doc/plugin-tools.txt) — `:help plugin-tools`.
@@ -86,6 +107,12 @@ Run from the repository root:
 ```sh
 python3 tests/run.py unit --filter docs
 python3 tests/run.py default
+```
+
+Refresh the screenshots after UI changes (requires `rsvg-convert`):
+
+```sh
+python3 doc/screenshots/capture.py
 ```
 
 See [the test workflow](tests/README.md) for dependencies, optional suites and
