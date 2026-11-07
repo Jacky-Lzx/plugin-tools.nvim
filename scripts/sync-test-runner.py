@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
-FILES = ("run.py", "runner_checks.py")
+FILES = ("run.py", "runner_checks.py", "docs_checks.py")
 
 
 def main():
@@ -28,6 +28,11 @@ def main():
         targets.append(repo)
     for repo in targets:
         for filename in FILES:
+            manifest = json.loads((repo / "tests/cases.json").read_text())
+            if filename == "docs_checks.py" and not any(
+                "tests/docs_checks.py" in case["files"] for case in manifest["cases"]
+            ):
+                continue
             source = SOURCE / "tests" / filename
             destination = repo / "tests" / filename
             if (

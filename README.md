@@ -1,489 +1,57 @@
 # plugin-tools.nvim
 
-A small Neovim plugin manager for explicit plugin composition and on-demand
-runtime mounting and initialization. Requires Neovim 0.11+ and Git for package operations.
+Explicit plugin composition, package installation and runtime mounting.
 
-The manager installs packages, mounts runtime directories, applies configuration,
-and explains relationships. Plugins decide when their features do work. There are
-no general event/key/command loading specifications, `require()` hooks, module
-scans, polling timers, automatic downloads, or update checks during startup.
+## Features
 
-## Use the local checkout
+- Inspect plugin ownership, activation reasons and timings.
+- Install exact locked revisions and review updates before applying them.
+- Keep package management separate from feature initialization.
 
-Add this checkout to `runtimepath` in `init.lua`, before native plugin loading:
+## Requirements
 
-```lua
-vim.opt.runtimepath:prepend(vim.fn.expand("~/Documents/Github/nvim_plugins/plugin-tools.nvim"))
-require("plugin_tools").setup(require("my_plugin_specs"))
-```
+Neovim **0.11+**. Git is required for package operations. Startup does not download packages.
 
-`my_plugin_specs.lua` returns the options table. A small real-package example:
+## Installation
 
-```lua
-return {
-  root = vim.fn.stdpath("data") .. "/plugin-tools",
-  lockfile = vim.fn.stdpath("config") .. "/plugin-tools-lock.json",
-  dev = { path = "~/Documents/Github/nvim_plugins", fallback = true },
-  specs = {
-    {
-      id = "file-tools.nvim",
-      source = "Jacky-Lzx/file-tools.nvim",
-      dev = true,
-      main = "file_tools",
-      opts = { tree = { width = 40 } },
-    },
-  },
-}
-```
-
-Keep an existing configuration unchanged while developing this manifest. A
-plugin's integration with your other plugins belongs in your configuration or
-that plugin; this manager does not supply those integrations.
-
-For the first installation, explicitly run the administration script:
+Clone the public repository into Neovim's native package directory:
 
 ```sh
-nvim --headless -u NONE -i NONE --noplugin \
-  -l /path/to/plugin-tools.nvim/examples/manage.lua /path/to/my_plugin_specs.lua install
+git clone https://github.com/Jacky-Lzx/plugin-tools.nvim.git \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/tools/start/plugin-tools.nvim"
 ```
 
-Then start Neovim normally. Alternatively, temporarily set `strict = false`, run
-`:PluginTools install`, wait for completion, and restart. Missing plugins are
-reported as `missing`, and skipped in permissive mode. Strict startup is the
-default and checks every directory before changing `runtimepath`.
-
-## Composition and activation
-
-The following illustrative manifest shows both forms of nesting:
+Call this from `init.lua`, before native plugin loading:
 
 ```lua
-local manager = require("plugin_tools").setup({
-  specs = {
-    {
-      id = "frontend",
-      dir = "~/plugins/frontend",
-      dependencies = { "renderer", { id = "icons", optional = true } },
-      config = function(ctx)
-        -- This callback only registers an entry point.
-        vim.api.nvim_create_user_command("MyPreview", function()
-          ctx.use("renderer").render()
-        end, {})
-      end,
-      children = {
-        -- A module within the same checkout; no extra clone or version.
-        { id = "frontend.outline", main = "frontend.outline" },
-        -- A separate runtime root inside the same checkout.
-        { id = "frontend.syntax", path = "components/syntax" },
-        -- An independent package organized under this frontend.
-        {
-          id = "renderer",
-          dir = "~/plugins/renderer",
-          main = "renderer",
-          opts = { border = "rounded" },
-        },
-      },
-    },
-  },
-})
+require("plugin_tools").setup({ specs = {} })
 ```
 
-Before `:MyPreview`, `renderer` is available on `runtimepath` but its main module
-and configuration have not been loaded by this manager. On first use,
-`ctx.use("renderer")` initializes it once and returns `require("renderer")`.
-Subsequent calls reuse its initialized state and Lua's module cache.
+## Usage
 
-For plugins that should work without depending on this manager, inject a provider
-function from `config(ctx)` into the frontend's setup options. The plugin calls
-that provider only when needed. Or give the backend a lightweight setup and let
-its public API lazily initialize expensive internals itself.
-
-`mount = "on-demand"` keeps a package off runtimepath until `mount(id)`,
-`activate(id)`, `use(id)` or a declared `ft` matches. It defaults to not starting;
-`start = true` explicitly overrides that default. Same-checkout children share the
-package policy and runtime directory, but retain independent initialization.
-Children with `path` mount their component plus the package root when activated.
-Existing declarations default to `mount = "startup"`.
-
-```lua
-{ id = "tex-tools.nvim", source = "Jacky-Lzx/tex-tools.nvim", main = "tex-tools",
-  mount = "on-demand", ft = { "tex", "plaintex" }, opts = {} }
+```vim
+:PluginTools
+:PluginTools profile
+:PluginTools explain {id}
 ```
 
-`ft` contains literal filetypes and initializes once, including buffers that exist
-before manager setup. Repeated declarations combine filetypes in declaration order.
-It defaults `start` to false and rejects an explicit `start = true`. The plugin's
-setup must attach existing matching buffers as well as future buffers; the manager
-does not replay FileType or ftplugin scripts. Keep filetype detection rules and
-settings required by native ftplugins in the host's early configuration.
+## Documentation
 
-Late mounting sources only that runtime root's `plugin/**/*.vim`, then Lua files,
-then `after/plugin/` Vim and Lua files, before configuration. It honors
-`loadplugins` and uses temporary exact-file SourceCmd guards before VimEnter to
-prevent duplicate native startup sourcing. Source events retain their normal
-behavior; explicit script timings are measured by the manager, including when
-source events are suppressed inside a non-nested FileType callback.
-Runtime source errors are retained and are not silently retried. A mount exposes
-runtime files and runs native plugin scripts, but does not call setup. It does not
-source ftdetect/ftplugin files or replay past events. Plugins depending on those
-startup phases should retain startup mounting until explicitly adapted.
+- [Complete reference](doc/plugin-tools.txt) — `:help plugin-tools`.
+- [Workflow and integration guide](doc/guide.md).
+- Diagnose availability with `:checkhealth plugin_tools`.
 
-With startup mounting, `start = false` controls **manager configuration only**.
-It does not prevent native
-`plugin/`, `ftdetect/`, `ftplugin/`, or other runtime scripts from executing. A
-backend with expensive native startup scripts must first move that work into its
-own API. This manager does not rewrite third-party plugin lifecycles.
+## Development
 
-Call `setup()` during `init.lua`. Native Neovim loads `plugin/` and `after/plugin/`
-scripts for startup-mounted roots in its usual phases. The manager sources native
-plugin scripts only for on-demand roots, as described above.
-Managed roots are inserted before the built-in runtime, preserving preceding
-configuration directories. Managed `after/` directories precede existing
-configuration `after/` directories so user overrides still apply last.
-
-## Entry-point ownership
-
-Plugins own their commands, public APIs, and feature-specific events. Keep their
-`setup()` lightweight: save options and register native entry points, then load
-heavy implementations when those entry points run. Personal keymaps and
-cross-plugin adapters belong in the configuration's `config(ctx)` callback.
-The manager has one configuration phase and no separate `bootstrap` hook.
-
-For example, a plugin's lightweight setup may register `:MyPreview`; your config
-calls setup and maps `<leader>p` to that command. The command callback loads the
-renderer itself. Neither the plugin nor the keymap needs to know the manager.
-
-## Specification
-
-Every node has a required explicit `id` containing letters, digits, `_`, `-`, or
-`.` and beginning with a letter or digit. Unknown fields are rejected.
-
-| Field | Meaning |
-| --- | --- |
-| `source` | Git URL, local Git repository path, or `owner/repository` shorthand |
-| `origin` | Optional declaration label, such as a configuration module or project file |
-| `dir` | External checkout, never installed, updated, frozen, or deleted |
-| `dev` | Prefer `dev.path/id`; fall back to `source` unless `dev.fallback = false` |
-| `version` | Branch, tag, commit, or explicit Git ref; no semver solver |
-| `children` | Nested node declarations |
-| `path` | Component runtime directory relative to its package owner, not immediate parent |
-| `dependencies` | IDs, or `{ id = "...", optional = true }` references |
-| `after` | IDs that must initialize before this node; activates them when necessary |
-| `enabled` | Boolean or zero-argument predicate; false omits this contribution and its subtree |
-| `optional` | Keep defaults dormant until another enabled, non-optional declaration selects the same ID |
-| `start` | Initialize during startup; defaults true for ordinary roots, false for children and deferred/ft nodes |
-| `mount` | Package owner: `"startup"` (default) or `"on-demand"` |
-| `ft` | Literal filetype list triggering initialization once; combines across declarations |
-| `main` | Module passed to `require()` on activation; default activation calls its `setup(opts)` |
-| `opts` | Configuration table, copied before passing to plugin code |
-| `config` | `function(ctx)` replacing default setup, or false to skip automatic setup |
-| `build` | Package-owner-only argv list, or `function({ id, dir })`; runs in staging |
-
-A declaration containing `source` or `dir` owns its package. Other children share
-their nearest package owner's checkout, version, and build. Their `path`, when
-present, must be a relative path inside that checkout. Components may have their
-own `main`, configuration, and explicit activation.
-
-IDs are global. Repeated declarations of an ID share one node and package.
-Scalar fields must agree. Options merge in declaration order: maps merge
-recursively; lists replace; an empty table clears that key. Dependencies combine,
-with required references taking precedence over optional references. Children do
-not inherit the parent's arbitrary options. A disabled declaration does not veto
-another enabled declaration of the same shared plugin.
-
-To enable a plugin only in selected projects, keep its complete declaration optional:
-
-```lua
-{ id = "notes", source = "author/notes", optional = true, opts = { border = "rounded" } }
-```
-
-Have the host configuration securely read a project manifest and append its native
-declarations before calling `setup()`. The project can select the plugin by ID:
-
-```lua
-return { { id = "notes", opts = { border = "single" } } }
-```
-
-Without an enabled, non-optional declaration of `notes`, its optional defaults and
-subtree contribute no packages, directory checks, runtime paths, setup calls, or
-installation tasks. Dependencies and `after` references do not select optional
-plugins. A dormant subtree cannot select itself through its children. Once
-selected, all enabled contributions merge in their original declaration order;
-default source, configuration and options remain available. Predicates are evaluated
-once for each reachable declaration. `enabled = false` still discards that
-contribution; it is not a defaults registry. An optional declaration's `optional`
-flag is independent of optional dependency references.
-
-The manager does not discover or execute project files. Selection happens before
-startup mounting; changing projects in an existing session does not unload plugins.
-With default startup mounting, `start = false` means mounted but not configured,
-rather than dormant. Explicit `mount = "on-demand"` independently delays mounting.
-
-All selected, enabled declarations participate in installation. Dependencies are validated
-references, not a discovery or version resolution system. Required references
-must be declared and enabled; optional references may be absent. An optional
-reference alone does not create or install a package.
-
-Dependencies impose no setup order and never activate their targets. Only
-`after` adds initialization constraints. Dependency cycles are allowed;
-initialization cycles and recursive activation report the cycle path.
-
-`explain(id)` includes ordered `declarations` with origin labels, manifest positions,
-parent IDs, fields and enabled state. Same-package children inherit the origin of
-their declaring contribution unless they supply one. Scalar conflicts name both
-origins. `option_history` lists assigned key paths in merge order: `replace`
-supersedes the whole subtree at that path, while `clear` records an empty table.
-Later descendant assignments refine an earlier replacement; a later ancestor
-replacement supersedes earlier descendants. Disabled contributions have no option
-assignments. History stores metadata only; final option values remain in `opts`.
-Missing labels use `manifest` plus a position such as `specs[2].children[1]`.
-
-`ctx` contains `id`, `dir`, a private `opts` copy, and `has(id)`, `activate(id)`,
-`mount(id)`, and `use(id)` closures. Those closures accept only dependencies declared by that
-node. `has()` inspects availability without loading modules. A context uses dot
-calls (`ctx.use(id)`), while manager instances use colon calls (`manager:use(id)`).
-Nonempty `opts` are copied and cached on first access; a callback that only
-registers entry points does not copy the options tree. Contexts receive independent
-copies. Graph option merges mutate only manager-owned tables, copying incoming
-values once; caller
-specifications and other nodes remain isolated.
-
-## Lua API and commands
-
-`require("plugin_tools").setup(options)` creates, starts, and returns the default
-manager. The manager and commands remain available for status, health checks,
-and package operations if startup configuration fails. Failed initialization is
-not retried automatically. Call setup once. Top-level methods forward to that manager. `new(options)`
-creates an independent instance without mounting or initializing anything;
-call `manager:start()` when ready. Start is idempotent.
-
-Synchronous inspection/runtime methods:
-
-```lua
-manager:has(id)       -- Declared and not known missing; no require(), Git, or source scan
-manager:mount(id)     -- Expose runtime and native scripts without running setup
-manager:activate(id)  -- Configure once; explicit after prerequisites are activated first
-manager:use(id)       -- Activate and return require(main); main is required
-manager:status()      -- Copies of registered/mounted/ready/missing/failed states
-manager:open()        -- Open the status panel (UI module loads on demand)
-manager:profile()     -- Copied startup stages and per-plugin timing/state snapshot
-manager:explain(id)   -- Package, source, parents, users, dependencies, configuration, state
-```
-
-A failed configuration is retained as `failed` and is not automatically retried;
-restart after fixing it. `after` requires a present node even if the caller is not
-started automatically. `strict = false` tolerates missing directories, but an
-explicit activation of a missing plugin still fails.
-
-Async package methods return a task with `done`, `result`, `error`, and
-`task:wait(timeout_ms)`. `wait()` pumps the event loop; a wait timeout does not
-cancel or unlock the ongoing operation. Inspect the task or wait again.
-
-`on_progress(event)` receives isolated phase events while an operation runs:
-`checking`, `cloning`, `checkout`, `submodules`, `building`, `helptags`, `staged`,
-and `publishing`, followed by completion or rollback. Events include `id`,
-`total`, `completed`, and elapsed time. `task:subscribe(callback)` adds an observer
-and returns an unsubscribe function; observer errors never abort package work.
-`task:snapshot()` returns copied per-package progress, including `before_commit`,
-`after_commit`, build requirements and failure details. Counts advance after
-commit, or after a preview validates all selected packages. `task.report` is
-available even on failure, with a
-structured `{ id, phase, message }` error; `wait()` keeps returning `nil, error`
-on failure. Successful results retain the `packages` ID list and add `details`.
-`manager.last_operation` retains the latest task, whose `events` contain the last
-500 phase/process records (each stdout/stderr record is limited to 16 KiB).
-
-| Method / command | Behavior |
-| --- | --- |
-| `install()` / `:PluginTools install [ids...]` | Install missing packages at locked revision, or declared version; verify existing versions against the lock |
-| `update()` / `:PluginTools update [ids...]` | Update selected packages and lock revisions |
-| `plan()` / `:PluginTools plan [ids...]` | Preview update commits, affected components and builds without publishing |
-| `update({plan=report})` / `:PluginTools apply` | Apply the latest reviewed plan's exact commits |
-| `restore()` / `:PluginTools restore [ids...]` | Restore selected packages to exact locked revisions |
-| `freeze()` / `:PluginTools freeze [ids...]` | Record selected existing checkout revisions |
-| `clean()` / `:PluginTools clean` | Preview unreferenced owned packages |
-| `clean({dry_run=false})` / `:PluginTools clean --apply` | Remove those packages and their lock entries |
-| `:PluginTools status` / `:PluginTools explain id` | Inspect state and inclusion reasons |
-| `:PluginTools profile` | View startup phases and per-plugin timings |
-| `:PluginTools log` | View the last operation's phase and process log |
-| `recover()` / `:PluginTools recover` | Preview recovery of an interrupted transaction |
-| `recover({dry_run=false})` / `:PluginTools recover --apply` | Apply validated rollback or finish committed cleanup |
-
-Operations accept `{ ids = {...}, concurrency = 4, timeout = 120000, on_progress = function(event) ... end,
-on_complete = function(result, err) ... end }`. IDs select package owners, so
-selecting a component selects its shared checkout. Clean uses the whole graph and
-does not accept IDs. Manager options `concurrency` and `git_timeout` supply the
-defaults. `timeout` bounds each process. `commands = false` omits `:PluginTools`.
-
-Package operations never execute plugin configuration. After installing or
-updating, restart Neovim to use new runtime files and configuration; already
-required modules are not unloaded. Commands report completion asynchronously.
-
-`:PluginTools` opens a centered, rounded floating panel with a searchable scratch
-buffer, status summary and theme-aware state colors. Columns adapt to the window;
-long paths shorten in the list and wrap in details. `j`/`k` move between plugins.
-`/` filters IDs and directories, Space selects nodes, Enter shows compact details,
-`o` expands the complete configuration/merge history, and `?` shows all shortcuts.
-`l` switches between status and operation logs. `u`, `i`, `s`, and `f` update,
-install, restore, or freeze the selection (or the node under the cursor).
-Components select their shared package automatically. `c` previews cleanup and
-`C` applies cleanup to the complete graph. `p` previews an update and `a` applies
-the reviewed commits. `R` previews recovery. `r` refreshes; `q` or Escape closes.
-The panel subscribes to active tasks and releases its subscription when closed;
-it adds no startup timers or UI dependencies. Operations started through the Lua
-API outside the panel can be attached with `r`. Command completion includes IDs.
-
-Resize and view changes preserve selection and the current plugin. Highlight
-defaults follow `ColorScheme` and respect user overrides: `PluginToolsNormal`,
-`PluginToolsBorder`, `PluginToolsTitle`, `PluginToolsReady`, `PluginToolsActive`,
-`PluginToolsWarning`, `PluginToolsError`, `PluginToolsSelected`,
-`PluginToolsSelectedLine` and `PluginToolsCursorLine`. The panel uses native
-Neovim windows and ordinary Unicode symbols, with no icon or UI dependency.
-
-Update previews clone Git objects into temporary staging to resolve target refs,
-but do not check out files, initialize submodules, generate tags, run builds,
-replace installed directories, or write the plugin lockfile. Details include
-old/new commits, affected components, and build requirements/argv. Apply accepts
-only the latest successful plan from the same manager instance, validates that
-the source/version/build and checkout still agree, and pins the reviewed commit
-even if an upstream branch advances. Public report edits do not change the
-private reviewed targets. Plans are session-local; re-plan after restarting.
-
-## Update and cleanup guarantees
-
-Packages live under `root/id`. Local development directories are used directly,
-and excluded from remote operations. Lockfile entries for temporarily local
-development overrides are preserved. Shorthand URLs default to
-`https://github.com/%s.git`; override `url_format` when needed.
-
-Install/update/restore use a bounded worker pool (default four). Each package is
-cloned and built in a private staging directory. Updates reuse existing Git
-objects with `--reference-if-able --dissociate`; partial clone filters reduce
-unneeded blob transfers when supported by the server. Submodules are initialized.
-Build argv runs without an implicit shell. A Lua build function runs on Neovim's
-main thread; use argv for expensive work.
-
-Only after every package succeeds are complete directories published, with
-backups retained until the lockfile is atomically replaced. JSON is written with
-two-space indentation, sorted object keys, and a final newline for stable Git
-diffs. Caught failures roll back published checkouts. Help tags are generated when
-a `doc/` directory exists. Other build outputs must be gitignored; a dirty build
-is rejected.
-
-Tracked/untracked changes block replacement and cleanup. A checkout moved away
-from its locked commit blocks update; explicitly freeze or restore it first.
-Cleanup also rejects a checkout that differs from its recorded commit, preserving
-local commits when a plugin is removed from the manifest.
-Existing paths need matching manager ownership metadata under `.git/` before
-replacement. New paths are checked again before publication. Clean ignores
-unknown directories and never follows a package-directory symlink. Shared
-packages remain selected while any enabled declaration still owns them.
-
-An exclusive `root/.operation-lock` prevents concurrent operations on the same
-root, including across processes. Its atomically replaced `journal.json` records
-staging ownership, active child PIDs, publication intents before renames, backups,
-and the old/target lockfile. A process crash leaves those records for explicit
-recovery. `:PluginTools recover` previews actions; `--apply` rolls back unfinished
-publication or keeps an already committed version and removes backups. A target
-lockfile proves commit completion even if termination preceded the final journal
-marker. Caught rollback/cleanup failures retain their journal and backups.
-
-Recovery checks all paths and checkout states before changing any package. It
-refuses unfinished live owners, recorded live Git/build processes, dirty or moved
-checkouts, changed lockfiles, mismatched ownership, symlinks and unsafe journal
-paths. Unknown directories are preserved. Resolve the reported condition and
-preview again. Legacy locks without a journal require manual inspection.
-Recovery takes a separate claim under the operation lock. If recovery itself is
-killed, inspect `recovery/owner.json`; after confirming that process has stopped,
-remove only the stale `recovery/` claim and preview again. Do not delete the
-transaction journal or backups. Recovery handles process termination; storage
-failure or power loss can still require manual inspection. Use one root/lockfile
-pair per configuration and do not externally edit checkouts during an operation.
-
-## Performance and verification
-
-The entry module is small. Git, JSON lockfile handling, and command rendering load
-only when requested. Startup resolves declarations, checks directories, then
-assigns `runtimepath` once. It does not inspect Git status, read the lockfile,
-index Lua modules, check updates, or create timers. Module availability uses
-Neovim's native runtime lookup. Ready activation is a constant-time state check.
-Lightweight profiling is enabled by default (`profile = false` disables it).
-Open `:PluginTools profile`, or press `P` in the panel. `t` switches between
-slowest startup first and alphabetical order; filtering, selection, details and
-package actions work in both plugin views. Wide status panels also show STARTUP.
-
-The plugin list shows `children` as a tree, including independently installed
-child packages. Filtering keeps matching nodes and their ancestors visible.
-Shared children appear once; details list every declared parent. The profile
-stays flat for time/name sorting and annotates children with `↳ parent` rows.
-Ordinary dependencies do not create tree nesting. Enter still toggles details.
-
-The profile separates declaration resolution, runtimepath mounting, plugin
-initialization, native sourced scripts, and other startup work. Its total adds
-resolution time to the interval from `start()` through the beginning of
-`VimEnter`; it excludes earlier configuration/spec construction and any idle gap
-between `new()` and `start()`. It is not whole-process Neovim startup time.
-Setup after `VimEnter` measures only the manager's own startup, explicitly labeled.
-
-Plugin STARTUP includes exclusive initialization and attributed source time.
-INIT excludes nested managed activations and timed source calls; details retain
-the inclusive activation duration. SCRIPTS records emitted `SourcePre`/`SourcePost`
-pairs, matching the most specific declared runtime root (including symlink
-aliases); shared roots are attributed once to their package. This includes native
-`plugin/` and `after/plugin/` scripts without replaying them. Script lists appear
-in plugin details. Source events suppressed by non-nested autocommands (including
-some filetype scripts) and work outside these spans fall under Other startup
-work. Profiling itself contributes to measured wall time. There are no `require()` or autocommand wrappers.
-
-Source observers remove themselves at `VimEnter` or startup failure. Startup
-measurements then remain frozen; later managed activation appears under LATER.
-Unmanaged plugin-internal first-use work is not automatically measured. Failed
-initialization retains its elapsed time; interrupted source samples are omitted
-and reported. `manager:profile()` returns copied `{timings, plugins}` data;
-`manager.timings.resolve_ms` and `start_ms` retain their existing meanings.
+Run from the repository root:
 
 ```sh
-sh tests/run.sh
-python3 tests/benchmark.py
+python3 tests/run.py unit --filter docs
+python3 tests/run.py default
 ```
 
-The suite covers graph validation, shared components, first-use dependencies,
-runtime paths with commas/Unicode, native startup in a real PTY, asynchronous Git
-installation, lock restoration, dirty-checkout protection, transaction rollback,
-safe cleanup, and event-loop responsiveness. Tests isolate data/cache/state and
-use temporary local repositories; no network or configuration migration is needed.
+See [the test workflow](tests/README.md) for dependencies, optional suites and
+retained failure evidence. Local development overrides belong in your package
+manager configuration; public installation uses the repository above.
 
-The benchmark writes `benchmark-results.json`: 15 fresh Neovim processes per
-10/100/500-plugin manifest after one warm-up, with median/p95 manager setup,
-Lua allocation delta, and repeated ready-activation cost. Package directories are
-prepared before timing. It includes the first `require("plugin_tools")`, graph
-resolution, and mounting; plugin business initialization is excluded. OS caches
-are warm, and Lua allocation delta is not process RSS or a leak measurement.
-
-License: MIT.
-
-## Command ownership
-
-Commands belong to the plugin; choose global entry keys and short aliases in
-your configuration. Registration reports same-name conflicts without replacing
-user commands. Reconfiguration refreshes only commands still owned by this
-plugin, and cleanup preserves subsequent user replacements.
-
-## Setup contract
-
-`setup(nil)` creates the singleton with defaults. Configuration must be a table; caller-owned tables
-are copied before use. Invalid configuration types do not replace live handlers
-or commands. Calling setup again is rejected; manager `start()` is idempotent.
-The singleton manager accepts setup once; use `new(opts)` for another isolated manager.
-
-A manager owns a fixed plugin graph. Loading native plugin scripts is not
-reversible, so there is no generic unload/dispose API. Runtime feature teardown
-belongs to each feature plugin; use `new(opts)` for an isolated manager graph.
-
-## Health and inspection
-
-Health reports actionable failures and a compact result for applicable checks. Disabled,
-optional and not-yet-activated features do not warn solely because they are inactive.
-Inspection does not configure plugins, start services or install dependencies.
-Use `:PluginTools` for detailed configuration and runtime information.
-
-[Test workflow](tests/README.md): registered suites, filtering, required fixtures and retained failure evidence.
+[License](LICENSE).
