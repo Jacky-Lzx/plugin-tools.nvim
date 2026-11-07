@@ -13,9 +13,10 @@ CONTENTS                                                        *plugin-tools*
 ==============================================================================
 QUICK START                                          *plugin-tools-quickstart*
 
-Requires Neovim 0.11+. Git is required for package operations. Ordinary setup
-does not download packages. The opt-in bootstrap installs on its first run;
-see |plugin-tools-bootstrap| and the init.lua loader in README.md.
+Requires Neovim 0.11+. Git is required for package operations. Setup installs
+missing managed packages by default; auto_install=false disables this.
+To install plugin-tools.nvim itself, see |plugin-tools-bootstrap| and the
+init.lua loader in README.md.
 
 >lua
     require("plugin_tools").setup({ specs = {} })
@@ -44,11 +45,20 @@ SETUP                                                     *plugin-tools-setup*
     },
   })
 <
-Call setup during init.lua, before native plugin loading. Installation is
-explicit; startup never downloads packages. Use new(options) for an
-independent manager, run install():wait(), and restart before normal startup.
-Alternatively, strict=false permits startup with missing directories. If
-startup fails after manager creation, status, health checks and package
+Call setup during init.lua, before native plugin loading. auto_install=true
+installs absent managed packages before mounting or configuration, honoring
+locked revisions. Existing checkouts are not inspected with Git or updated.
+Installation completes in this startup, before native plugin loading. Missing
+external dir checkouts or component subdirectories are not installed.
+
+auto_install is a boolean, defaults to true, and applies to setup() and to
+new(options):start(). new() alone never installs or starts anything. With
+auto_install=false, use install():wait() explicitly and restart before normal
+startup. strict=false permits startup with remaining missing directories;
+it does not suppress automatic installation errors. Failed installations stop
+startup before mounting or configuration and retain transaction diagnostics.
+When all packages are present, startup does not run Git or read the lockfile.
+If startup fails after manager creation, status, health checks and package
 commands remain available; initialization errors are retained and are not
 automatically retried.
 
@@ -72,19 +82,21 @@ children. Bootstrap prepends this managed package with dev=false and
 config=false; global dev overrides do not redirect it to an external checkout.
 Input options are copied. self is consumed before manager creation.
 
-If the self package is absent, bootstrap explicitly installs all selected
-packages through new(options):install():wait(), honoring the lockfile, before
-starting the installed version. It clears seed modules and restores the
-runtimepath before loading the managed copy. Errors are raised; an interrupted
-transaction may need recovery. The seed and installed versions must both
+If the self package is absent, bootstrap explicitly installs itself and, by
+default, all selected packages through new(options):install():wait(), honoring
+the lockfile, before starting the installed version. It clears seed modules
+and restores the runtimepath before loading the managed copy. Errors are
+raised; an interrupted transaction may need recovery. The seed and installed
+versions must both
 support this bootstrap entry point. Existing unowned checkouts are not adopted.
+With auto_install=false, the initial seed installs only plugin-tools.nvim.
 
-If the self package exists, bootstrap only sets up the manager: no Git,
-lockfile reads, update checks or downloads. Later missing packages use the
-normal install workflow. Self updates use the same plan/apply, update,
-restore and freeze operations and ownership checks as other packages.
-The running session keeps the old Lua modules until restart. Do not manually
-clear package.loaded entries to reload the updated manager in place.
+If the self package exists, bootstrap sets up the manager with the same
+auto_install behavior: later missing packages are installed by default; no Git
+or lockfile reads occur if all packages are present. Self updates use the same
+plan/apply, update, restore and freeze operations and ownership checks as other
+packages. The running session keeps the old Lua modules until restart. Do not
+manually clear package.loaded entries to reload the updated manager in place.
 
 COMPOSITION                                         *plugin-tools-composition*
 
@@ -221,7 +233,8 @@ paths and changed lockfiles. Interrupted recovery claims and legacy locks need
 manual inspection; see README.md.
 
 Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
-strict=true, commands=true, concurrency=4, git_timeout=120000, profile=true.
+auto_install=true, strict=true, commands=true, concurrency=4,
+git_timeout=120000, profile=true.
 
 PROFILING                                               *plugin-tools-profile*
 
@@ -238,6 +251,8 @@ through the beginning of VimEnter, excluding earlier init/spec construction
 and any gap between new() and start(). It is not whole-process startup time.
 After VimEnter, setup reports manager startup only. Source observers are
 removed at VimEnter or startup failure; startup totals then remain fixed.
+Mounting and manager elapsed timings include automatic installation when
+packages are missing.
 
 Some sources inside non-nested autocommands emit no source events; those and
 other unmeasured startup work appear under Other startup work. No require()

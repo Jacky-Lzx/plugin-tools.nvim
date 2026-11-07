@@ -88,22 +88,12 @@ function Profile:started(ok)
   end
 end
 
-function Profile.new(manager)
-  local self = setmetatable({ manager = manager, stack = {}, recording = true }, Profile)
-  local t = manager.timings
-  t.enabled, t.complete, t.config_ms, t.native_ms = true, false, 0, 0
-  t.mount_ms, t.manager_ms, t.total_ms, t.other_ms, t.boundary = nil, nil, nil, nil, nil
-  t.incomplete_sources = 0
-  self.before_enter = vim.v.vim_did_enter == 0
-  t.scope = self.before_enter and "startup" or "manager"
-  if not self.before_enter then
-    return self
-  end
+function Profile:refresh_roots()
   -- Match the most specific declared runtime root; shared roots are charged
   -- once to their package. No directory scans or require() wrappers are needed.
   local roots = {}
-  for _, id in ipairs(manager.graph.order) do
-    local node = manager.graph.nodes[id]
+  for _, id in ipairs(self.manager.graph.order) do
+    local node = self.manager.graph.nodes[id]
     if not roots[node.dir] or node.id == node.owner then
       roots[node.dir] = id
     end
@@ -120,6 +110,21 @@ function Profile.new(manager)
   table.sort(paths, function(a, b)
     return #a > #b
   end)
+  self.roots, self.paths = roots, paths
+end
+
+function Profile.new(manager)
+  local self = setmetatable({ manager = manager, stack = {}, recording = true }, Profile)
+  local t = manager.timings
+  t.enabled, t.complete, t.config_ms, t.native_ms = true, false, 0, 0
+  t.mount_ms, t.manager_ms, t.total_ms, t.other_ms, t.boundary = nil, nil, nil, nil, nil
+  t.incomplete_sources = 0
+  self.before_enter = vim.v.vim_did_enter == 0
+  t.scope = self.before_enter and "startup" or "manager"
+  if not self.before_enter then
+    return self
+  end
+  self:refresh_roots()
   sequence = sequence + 1
   self.group = vim.api.nvim_create_augroup("PluginToolsStartupProfile" .. sequence, { clear = true })
   vim.api.nvim_create_autocmd("SourcePre", {
@@ -129,9 +134,9 @@ function Profile.new(manager)
       if self.manual_sources and self.manual_sources[file] then
         return
       end
-      for _, dir in ipairs(paths) do
+      for _, dir in ipairs(self.paths) do
         if vim.startswith(file, dir .. "/") then
-          owner = roots[dir]
+          owner = self.roots[dir]
           break
         end
       end

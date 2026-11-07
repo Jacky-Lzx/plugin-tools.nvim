@@ -32,6 +32,7 @@ H.case("strict missing-package startup keeps diagnostics and installation availa
     tools.setup({
       root = H.root .. "/packages",
       lockfile = H.root .. "/lock.json",
+      auto_install = false,
       specs = { { id = "source", source = source } },
     })
   end, "missing plugin directories")

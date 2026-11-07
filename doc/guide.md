@@ -41,17 +41,32 @@ Keep an existing configuration unchanged while developing this manifest. A
 plugin's integration with your other plugins belongs in your configuration or
 that plugin; this manager does not supply those integrations.
 
-For the first installation, explicitly run the administration script:
+By default, setup installs missing managed packages before mounting runtimes or
+running plugin configuration. Installation honors the lockfile and leaves
+existing checkouts unchanged. The packages are available in the same startup,
+including native plugin scripts and filetype detection when setup runs in
+`init.lua`. Local `dir` overrides and missing component subdirectories are not
+cloned. Package operations are loaded only when a managed package is absent.
+
+For an explicit installation workflow, set `auto_install = false` and run the
+administration script:
 
 ```sh
 nvim --headless -u NONE -i NONE --noplugin \
   -l /path/to/plugin-tools.nvim/examples/manage.lua /path/to/my_plugin_specs.lua install
 ```
 
-Then start Neovim normally. Alternatively, temporarily set `strict = false`, run
+Then start Neovim normally. Alternatively, also set `strict = false`, run
 `:PluginTools install`, wait for completion, and restart. Missing plugins are
 reported as `missing`, and skipped in permissive mode. Strict startup is the
 default and checks every directory before changing `runtimepath`.
+
+An automatic installation failure stops startup before mounting or configuration,
+even with `strict = false`. The transaction rolls back caught failures; the
+default manager's status, logs and commands remain available for diagnosis.
+Repair the cause and retry startup. Interrupted operations require the normal
+explicit recovery workflow. Automatic installation never updates existing
+packages or recovers interrupted transactions on its own.
 
 ## Bootstrap and self updates
 
@@ -61,9 +76,11 @@ is loaded. Its `setup(options)` returns the configured manager and adds a manage
 Use this entry point on every startup; do not also call `plugin_tools.setup()`.
 
 On the first run, the README loader clones a disposable seed. Bootstrap uses that
-seed's package operations to install the official checkout and all selected
-packages, honoring an existing lockfile. Seed modules are unloaded before setup
-loads the installed version. Git clone or installation failures stop startup;
+seed's package operations to install the official checkout and, by default, all
+selected packages, honoring an existing lockfile. With `auto_install = false`,
+the seed installs only plugin-tools.nvim itself; other packages use explicit
+installation. Seed modules are unloaded before setup loads the installed version.
+Git clone or installation failures stop startup;
 the seed is removed by the loader, and the normal transaction protects packages
 and lock revisions. A failed first installation can be retried. An interrupted
 transaction can require explicit recovery as described below; bootstrap never
@@ -76,11 +93,13 @@ recovery checkout and use its `examples/manage.lua` with `recover`, then
 current declarations. Retry the normal bootstrap after recovery completes.
 
 After installation, startup loads `root/plugin-tools.nvim/bootstrap.lua` directly.
-It does not run Git, read the lockfile, check updates or install newly declared
-packages. Use `strict = false` and `:PluginTools install` for later additions, then
-restart. Use `:PluginTools plan plugin-tools.nvim` and `:PluginTools apply` to
-review and apply a self update; the ordinary update, restore and freeze commands
-also support this package. The running session retains the previous Lua modules
+Missing managed packages are automatically installed unless `auto_install` is
+false. With all packages present, startup does not run Git or read the lockfile.
+For manual additions, set `auto_install = false` and `strict = false`, run
+`:PluginTools install`, then restart. Use `:PluginTools plan plugin-tools.nvim`
+and `:PluginTools apply` to review and apply a self update; the ordinary update,
+restore and freeze commands also support this package. The running session
+retains the previous Lua modules
 until restart, including modules that had not been loaded before the update.
 
 To use a mirror, change the seed clone URL in the README loader and pass the
@@ -259,10 +278,12 @@ pair per configuration and do not externally edit checkouts during an operation.
 
 ## Performance and verification
 
-The entry module is small. Git, JSON lockfile handling, and command rendering load
-only when requested. Startup resolves declarations, checks directories, then
-assigns `runtimepath` once. It does not inspect Git status, read the lockfile,
-index Lua modules, check updates, or create timers. Module availability uses
+The entry module is small. Git and JSON lockfile handling load for package
+operations, including automatic installation when a managed package is absent.
+Command rendering loads only when requested. Startup with all packages present
+resolves declarations, checks directories, then assigns `runtimepath` once.
+It does not inspect Git status, read the lockfile, index Lua modules, check
+updates, or create timers. Module availability uses
 Neovim's native runtime lookup. Ready activation is a constant-time state check.
 Lightweight profiling is enabled by default (`profile = false` disables it).
 Open `:PluginTools profile`, or press `P` in the panel. `t` switches between
@@ -280,6 +301,8 @@ initialization, native sourced scripts, and other startup work. Its total adds
 resolution time to the interval from `start()` through the beginning of
 `VimEnter`; it excludes earlier configuration/spec construction and any idle gap
 between `new()` and `start()`. It is not whole-process Neovim startup time.
+When startup installs missing packages, mounting and manager elapsed timings
+include the installation wait.
 Setup after `VimEnter` measures only the manager's own startup, explicitly labeled.
 
 Plugin STARTUP includes exclusive initialization and attributed source time.

@@ -7,11 +7,13 @@ import pty
 import select
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import time
 
 REPO = Path(__file__).resolve().parents[1]
+AUTO_INSTALL = "--auto-install" in sys.argv[1:]
 
 
 def write(path, text):
@@ -37,6 +39,15 @@ return {
     write(root / "sample.ptspec", "native filetype test")
     # JSON strings are valid Lua strings for these paths (no non-ASCII escapes).
     quote = lambda value: json.dumps(str(value), ensure_ascii=False)
+    if AUTO_INSTALL:
+        subprocess.run(["git", "init", "-q", "-b", "main", str(package)], check=True)
+        subprocess.run(["git", "-C", str(package), "add", "."], check=True)
+        subprocess.run([
+            "git", "-C", str(package), "-c", "user.name=Plugin Tools Test",
+            "-c", "user.email=plugin-tools@example.invalid", "-c", "commit.gpgsign=false",
+            "commit", "-qm", "native startup fixture",
+        ], check=True)
+    location = f"source = {quote(package)}" if AUTO_INSTALL else f"dir = {quote(package)}"
     init = root / "init.lua"
     write(init, f"""
 vim.opt.runtimepath:prepend({quote(REPO)})
@@ -51,8 +62,9 @@ local function snapshot(path)
     errors = vim.v.errmsg,
   }})}}, path)
 end
-require('plugin_tools').setup({{ specs = {{{{
-  id = 'front', dir = {quote(package)}, dependencies = {{'backend'}},
+local manager = require('plugin_tools').setup({{
+root = {quote(root / 'managed, 中文')}, lockfile = {quote(root / 'lock.json')}, specs = {{{{
+  id = 'front', {location}, dependencies = {{'backend'}},
   config = function(ctx)
     vim.api.nvim_create_user_command('PluginToolsTestUse', function()
       assert(ctx.use('backend').render() == 'rendered')
@@ -61,6 +73,11 @@ require('plugin_tools').setup({{ specs = {{{{
   end,
   children = {{{{ id = 'backend', main = 'terminal_backend', opts = {{answer = 42}} }}}},
 }}}} }})
+assert((manager.last_operation ~= nil) == {str(AUTO_INSTALL).lower()}, 'Unexpected startup installation state')
+if manager.last_operation then
+  assert(manager.last_operation.result and not manager.last_operation.result.restart_required)
+  assert(manager.states.front.phase == 'ready')
+end
 vim.cmd('filetype plugin on')
 vim.api.nvim_create_autocmd('VimEnter', {{once = true, callback = function()
   vim.schedule(function() snapshot({quote(cold)}) end)
@@ -132,7 +149,8 @@ end}})
                     break
         process.wait(timeout=5)
         assert process.returncode == 0
-        print("PASS real PTY: startup profile, native/after scripts, filetypes, frozen totals, cold dependency, first/repeated use")
+        mode = "automatic installation" if AUTO_INSTALL else "local checkout"
+        print(f"PASS real PTY ({mode}): startup profile, native/after scripts, filetypes, frozen totals, cold dependency, first/repeated use")
     finally:
         if process.poll() is None:
             process.kill()

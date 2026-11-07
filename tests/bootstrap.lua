@@ -111,14 +111,51 @@ H.case("warm bootstrap uses no Git or lockfile reads and preserves lazy modules"
   H.eq(H.git(target, "rev-parse", "HEAD"), initial)
 end)
 
-H.case("warm bootstrap leaves newly declared packages for explicit installation", function()
-  local later = replace(loader, "specs = {{", "strict = false, specs = {{ id = 'later', source = 'example/later' }, {")
+H.case("auto_install=false leaves newly declared packages for explicit installation", function()
+  local later = replace(
+    loader,
+    "specs = {{",
+    "auto_install = false, strict = false, specs = {{ id = 'later', source = 'example/later' }, {"
+  )
   run(
     [[
     assert(manager.states.later.phase == 'missing')
     assert(not vim.uv.fs_stat(root .. '/later'))
   ]],
     "vim.system = function() error('Unexpected automatic installation') end\n" .. later
+  )
+end)
+
+H.case("warm bootstrap automatically installs newly declared packages before configuring them", function()
+  local later = H.repo("later_backend")
+  local added =
+    replace(loader, "specs = {{", ("specs = {{ id = 'later', source = %q, main = 'later_backend' }, {"):format(later))
+  run(
+    [[
+    assert(seed == nil)
+    assert(manager.options.auto_install == true)
+    assert(manager.states.later.phase == 'ready')
+    assert(manager.states.later.count == 1)
+    assert(vim.uv.fs_stat(root .. '/later/.git'))
+    assert(manager.last_operation.result.action == 'install')
+    assert(vim.deep_equal(manager.last_operation.order, {'later'}))
+  ]],
+    added
+  )
+  H.eq(H.git(target, "rev-parse", "HEAD"), initial)
+end)
+
+H.case("auto_install=false bootstraps self without automatically installing other packages", function()
+  local manual_root = H.root .. "/manual-install"
+  local manual = replace(loader, root, manual_root)
+  manual = replace(manual, "specs = {{", "auto_install = false, strict = false, specs = {{")
+  run(
+    [[
+    assert(vim.uv.fs_stat(path .. '/.git'))
+    assert(not vim.uv.fs_stat(root .. '/dependency'))
+    assert(manager.states.dependency.phase == 'missing')
+  ]],
+    manual
   )
 end)
 

@@ -8,6 +8,38 @@
   "defaults": {},
   "cases": [
     {
+      "name": "auto_install",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/auto_install.lua"
+      ],
+      "files": [
+        "tests/auto_install.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "auto_install_startup",
+      "suite": "ui",
+      "command": [
+        "{python}",
+        "tests/startup.py",
+        "--auto-install"
+      ],
+      "files": [
+        "tests/startup.py"
+      ],
+      "timeout": 120
+    },
+    {
       "name": "bootstrap",
       "suite": "unit",
       "command": [

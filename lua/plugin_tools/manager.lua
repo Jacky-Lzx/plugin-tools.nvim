@@ -6,6 +6,10 @@ function Manager.new(opts)
   U.check(vim.fn.has("nvim-0.11") == 1, "Neovim 0.11+ is required")
   assert(opts == nil or type(opts) == "table", "plugin-tools: new expects a table")
   opts = vim.deepcopy(opts or {})
+  U.check(opts.auto_install == nil or type(opts.auto_install) == "boolean", "auto_install must be boolean")
+  if opts.auto_install == nil then
+    opts.auto_install = true
+  end
   local started = vim.uv.hrtime()
   local self = setmetatable({ options = opts, states = {}, stack = {}, started = false }, Manager)
   self.graph = require("plugin_tools.graph").resolve(opts.specs or {}, opts)

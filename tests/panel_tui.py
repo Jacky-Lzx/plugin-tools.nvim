@@ -25,7 +25,7 @@ local H = dofile({quote(repo / 'tests/helpers.lua')})
 local source = H.repo('panel')
 local original=vim.api.nvim_get_current_buf()
 vim.api.nvim_buf_set_lines(original,0,-1,false,{{'original unsaved text'}})
-local m = require('plugin_tools').setup({{strict=false, root=H.root..'/packages', lockfile=H.root..'/lock.json', specs={{{{
+local m = require('plugin_tools').setup({{auto_install=false, strict=false, root=H.root..'/packages', lockfile=H.root..'/lock.json', specs={{{{
  id='panel',source=source,build={{'sh','-c','sleep 0.2; printf PTY_BUILD'}}
 }},{{id='optional-template', optional=true, origin='test.optional'}}}}}})
 local view

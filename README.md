@@ -11,8 +11,8 @@ Explicit plugin composition, package installation and runtime mounting.
 
 ## Requirements
 
-Neovim **0.11+**. Git is required for installation and updates. Normal startup
-does not download packages; the opt-in bootstrap installs on its first run.
+Neovim **0.11+**. Git is required for installation and updates. Startup installs
+missing managed plugins by default; set `auto_install = false` to disable this.
 
 ## Installation
 
@@ -38,8 +38,14 @@ if not ok then error(manager, 0) end
 
 The temporary clone installs the managed copy and declared packages through the
 normal transaction and lockfile workflow, then is removed. Subsequent startups
-load the managed copy directly without Git or lockfile reads. Keep
+automatically install newly declared or deleted managed packages before loading
+your plugin configuration. Existing plugins are not updated. When packages are
+present, startup runs no Git commands and does not read the lockfile. Keep
 `plugin-tools-lock.json` with your configuration to reproduce revisions.
+
+`auto_install` defaults to `true` for both bootstrap and ordinary `setup()`.
+Set it to `false` in the setup options to install packages explicitly with
+`:PluginTools install`; use `strict = false` to enter Neovim with missing plugins.
 
 Update plugin-tools.nvim itself with `:PluginTools update plugin-tools.nvim`, or
 include it in `:PluginTools plan` followed by `:PluginTools apply`. Restart after

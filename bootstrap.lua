@@ -51,7 +51,7 @@ function M.setup(options)
     prepend(checkout)
     local ok, err = pcall(function()
       local manager = require("plugin_tools").new(opts)
-      local task = manager:install()
+      local task = manager:install({ ids = opts.auto_install == false and { id } or nil })
       local result, failure
       repeat
         result, failure = task:wait()
