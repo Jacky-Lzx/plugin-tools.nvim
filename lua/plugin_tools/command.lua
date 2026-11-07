@@ -35,7 +35,7 @@ function M.run(manager, args)
         vim.notify(
           err or vim.inspect(result),
           err and vim.log.levels.ERROR or vim.log.levels.INFO,
-          { title = "PluginTools " .. action }
+          { title = "PluginTools " .. action, filetype = err and "text" or "lua" }
         )
       end,
     })
