@@ -478,3 +478,10 @@ The singleton manager accepts setup once; use `new(opts)` for another isolated m
 A manager owns a fixed plugin graph. Loading native plugin scripts is not
 reversible, so there is no generic unload/dispose API. Runtime feature teardown
 belongs to each feature plugin; use `new(opts)` for an isolated manager graph.
+
+## Health and inspection
+
+Health reports actionable failures and a compact result for applicable checks. Disabled,
+optional and not-yet-activated features do not warn solely because they are inactive.
+Inspection does not configure plugins, start services or install dependencies.
+Use `:PluginTools` for detailed configuration and runtime information.

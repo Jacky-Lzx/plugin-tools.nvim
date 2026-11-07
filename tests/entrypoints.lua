@@ -50,7 +50,7 @@ H.case("health reads state and help tags resolve", function()
   end
   require("plugin_tools.health").check()
   vim.health = health
-  assert(table.concat(captured, "\n"):find("without loading", 1, true))
+  assert(#captured == 3 and captured[3] == "Details: :PluginTools", "Health stays compact")
   H.write(H.root .. "/doc/plugin-tools.txt", table.concat(vim.fn.readfile("doc/plugin-tools.txt"), "\n"))
   vim.api.nvim_cmd({ cmd = "helptags", args = { H.root .. "/doc" } }, {})
   vim.cmd("help plugin-tools-api")
