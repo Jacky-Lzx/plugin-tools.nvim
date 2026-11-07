@@ -1,0 +1,416 @@
+{
+  "version": 1,
+  "default": [
+    "unit",
+    "ui",
+    "format"
+  ],
+  "defaults": {},
+  "cases": [
+    {
+      "name": "runner-contracts",
+      "suite": "unit",
+      "command": [
+        "{python}",
+        "tests/runner_checks.py"
+      ],
+      "files": [
+        "tests/runner_checks.py"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "setup_contract",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/setup_contract.lua"
+      ],
+      "files": [
+        "tests/setup_contract.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "command_ownership",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/command_ownership.lua"
+      ],
+      "files": [
+        "tests/command_ownership.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "json",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/json.lua"
+      ],
+      "files": [
+        "tests/json.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "graph",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/graph.lua"
+      ],
+      "files": [
+        "tests/graph.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "optional",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/optional.lua"
+      ],
+      "files": [
+        "tests/optional.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "provenance",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/provenance.lua"
+      ],
+      "files": [
+        "tests/provenance.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "runtime",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/runtime.lua"
+      ],
+      "files": [
+        "tests/runtime.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "deferred",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/deferred.lua"
+      ],
+      "files": [
+        "tests/deferred.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "operations",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/operations.lua"
+      ],
+      "files": [
+        "tests/operations.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "progress",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/progress.lua"
+      ],
+      "files": [
+        "tests/progress.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "plan",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/plan.lua"
+      ],
+      "files": [
+        "tests/plan.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "recovery",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/recovery.lua"
+      ],
+      "files": [
+        "tests/recovery.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "panel",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/panel.lua"
+      ],
+      "files": [
+        "tests/panel.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "entrypoints",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/entrypoints.lua"
+      ],
+      "files": [
+        "tests/entrypoints.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "setup_failures",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/setup_failures.lua"
+      ],
+      "files": [
+        "tests/setup_failures.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "options",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/options.lua"
+      ],
+      "files": [
+        "tests/options.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "profile",
+      "suite": "unit",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "--cmd",
+        "lua local ok, err = pcall(dofile, \"tests/profile.lua\"); if not ok then print(err); vim.cmd(\"cquit 1\") end",
+        "+qa!"
+      ],
+      "files": [
+        "tests/profile.lua"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "startup",
+      "suite": "ui",
+      "command": [
+        "{python}",
+        "tests/startup.py"
+      ],
+      "files": [
+        "tests/startup.py"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "optional_startup",
+      "suite": "ui",
+      "command": [
+        "{python}",
+        "tests/optional_startup.py"
+      ],
+      "files": [
+        "tests/optional_startup.py"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "deferred_startup",
+      "suite": "ui",
+      "command": [
+        "{python}",
+        "tests/deferred_startup.py"
+      ],
+      "files": [
+        "tests/deferred_startup.py"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "panel_tui",
+      "suite": "ui",
+      "command": [
+        "{python}",
+        "tests/panel_tui.py"
+      ],
+      "files": [
+        "tests/panel_tui.py"
+      ],
+      "timeout": 120
+    },
+    {
+      "name": "stylua",
+      "suite": "format",
+      "command": [
+        "stylua",
+        "--check",
+        "lua",
+        "tests",
+        "examples"
+      ],
+      "files": [],
+      "timeout": 90
+    }
+  ],
+  "support": {
+    "tests/helpers.lua": "Loaded by tests/json.lua",
+    "tests/run.sh": "Stable shell entry point for tests/run.py"
+  },
+  "manual": {
+    "tests/benchmark.py": "Explicit fixture installation, benchmark or manual acceptance tool; see testing documentation",
+    "tests/benchmark.lua": "Explicit fixture installation, benchmark or manual acceptance tool; see testing documentation"
+  }
+}
