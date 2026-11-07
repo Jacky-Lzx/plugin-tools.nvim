@@ -22,17 +22,17 @@ H.write(source .. "/lua/plugin_tools/session_probe.lua", "return { version = 'se
 local latest = H.commit(source, "new seed")
 
 local readme = table.concat(vim.fn.readfile("README.md"), "\n")
-local loader = assert(readme:match("```lua\n(.-)\n```"))
+local template = assert(readme:match("```lua\n(.-)\n```"))
 local function replace(text, before, after)
   local first, last = assert(text:find(before, 1, true))
   return text:sub(1, first - 1) .. after .. text:sub(last + 1)
 end
-loader = replace(loader, 'local root = vim.fn.stdpath("data") .. "/plugin-tools"', ("local root = %q"):format(root))
-loader = replace(loader, "https://github.com/Jacky-Lzx/plugin-tools.nvim.git", source)
-loader = replace(
-  loader,
-  "specs = {}",
-  ("lockfile = %q, self = { source = %q }, specs = {{ id = 'dependency', source = %q }},"):format(
+template = replace(template, "https://github.com/Jacky-Lzx/plugin-tools.nvim.git", source)
+local loader = replace(
+  template,
+  'local opts = require("plugins")',
+  ("local opts = { root = %q, lockfile = %q, self = { source = %q }, specs = {{ id = 'dependency', source = %q }} }"):format(
+    root,
     lockfile,
     source,
     dependency
@@ -92,6 +92,34 @@ H.case("README init loader installs locked self and plugins, discards seed and u
   H.eq(U.read_json(lockfile).plugins["plugin-tools.nvim"].commit, initial)
   H.eq(U.read_json(target .. "/.git/plugin-tools-owner.json").source, source)
   assert(vim.uv.fs_stat(root .. "/dependency/.git"))
+end)
+
+H.case("README options module configures the manager and forwards nested plugin options", function()
+  local configuration = assert(readme:match("```lua\n%-%- lua/plugins.lua\n(.-)\n```"))
+  local file_tools = H.repo("file_tools")
+  H.write(
+    file_tools .. "/lua/file_tools.lua",
+    "return { setup = function(opts) _G.readme_tree_width = opts.tree.width end }"
+  )
+  H.commit(file_tools, "README configuration fixture")
+  local preload = ("package.preload.plugins = function()\nlocal opts = (function()\n%s\nend)()\n"):format(configuration)
+    .. ("opts.root = %q; opts.lockfile = %q; opts.self.source = %q; opts.specs[1].source = %q\nreturn opts\nend\n"):format(
+      root,
+      lockfile,
+      source,
+      file_tools
+    )
+  run(
+    [[
+    assert(manager.options.auto_install == true and manager.options.strict == true)
+    assert(manager.options.profile == true and manager.options.commands == true)
+    assert(manager.options.concurrency == 4 and manager.options.git_timeout == 120000)
+    assert(manager.graph.packages['plugin-tools.nvim'].version == 'main')
+    assert(manager.states['file-tools.nvim'].phase == 'ready')
+    assert(_G.readme_tree_width == 36)
+  ]],
+    preload .. template
+  )
 end)
 
 H.case("warm bootstrap uses no Git or lockfile reads and preserves lazy modules", function()
@@ -243,7 +271,8 @@ H.case("failed first installation removes seed and leaves lock and existing pack
   run("", retry)
   assert(vim.uv.fs_stat(failing_root .. "/plugin-tools.nvim/.git"))
   local clone_failure = replace(checked, root, H.root .. "/failed-clone")
-  clone_failure = replace(clone_failure, source, H.root .. "/missing-seed-source")
+  clone_failure =
+    replace(clone_failure, ("%q, seed"):format(source), ("%q, seed"):format(H.root .. "/missing-seed-source"))
   run("", clone_failure, "does not exist")
 end)
 
