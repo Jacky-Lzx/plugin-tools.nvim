@@ -95,7 +95,6 @@ function Manager:_start()
   self.started = true
   for _, id in ipairs(self.graph.activation_order) do
     if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
-      self.states[id].reason = "startup"
       local ok, err = pcall(self.activate, self, id, { kind = "startup" })
       if not ok then
         self.start_error = err

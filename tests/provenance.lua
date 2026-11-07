@@ -119,7 +119,7 @@ H.case("activation traces retain callers and explicit ordering prerequisites", f
           ctx.activate("b")
         end,
       },
-      { id = "b", dir = H.root, start = false, after = { "c" } },
+      { id = "b", dir = H.root, after = { "c" } },
       { id = "c", dir = H.root, start = false },
     },
   }):start()

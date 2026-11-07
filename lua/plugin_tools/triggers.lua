@@ -29,7 +29,6 @@ function M.watch(manager)
           waiting[id], count = nil, count - 1
         elseif manager.graph.nodes[id].ft_set[ft] then
           waiting[id], count = nil, count - 1
-          state.reason = "FileType " .. ft
           manager:activate(id, { kind = "filetype", filetype = ft })
         end
       end
