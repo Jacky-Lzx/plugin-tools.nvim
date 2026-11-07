@@ -75,4 +75,37 @@ H.case("configuration or checkout changes invalidate the reviewed plan", functio
   end, "latest successful preview")
   H.eq(manager.operation, nil)
 end)
+H.case("plans explain forward, rewound and diverged history with file and commit summaries", function()
+  local history = H.repo("history")
+  local original = H.git(history, "rev-parse", "HEAD")
+  local m = Tools.new({
+    root = H.root .. "/history-packages",
+    lockfile = H.root .. "/history-lock.json",
+    specs = { { id = "history", source = history } },
+  })
+  H.wait(m:install())
+  H.write(history .. "/feature", "one\ntwo")
+  H.commit(history, "add feature")
+  local forward = H.wait(m:plan())
+  local change = forward.details[1].changes
+  H.eq(change.kind, "forward")
+  H.eq({ change.ahead, change.behind, change.files_changed, change.insertions }, { 1, 0, 1, 2 })
+  H.eq(change.commits[1].subject, "add feature")
+  H.eq(change.files[1].path, "feature")
+  local view = m:open({ id = "history" })
+  local text = table.concat(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false), "\n")
+  assert(text:find("add feature", 1, true) and text:find("1 ahead / 0 behind", 1, true))
+  vim.api.nvim_win_close(view.win, true)
+  H.wait(m:update({ plan = forward }))
+  H.git(history, "reset", "--hard", original)
+  local rewind = H.wait(m:plan()).details[1].changes
+  H.eq(rewind.kind, "rewind")
+  H.eq({ rewind.ahead, rewind.behind, rewind.deletions }, { 0, 1, 2 })
+  H.write(history .. "/alternative", "alternative")
+  H.commit(history, "alternate history")
+  local divergent = H.wait(m:plan()).details[1].changes
+  H.eq(divergent.kind, "diverged")
+  H.eq({ divergent.ahead, divergent.behind, divergent.files_changed }, { 1, 1, 2 })
+  H.eq(H.git(m.graph.packages.history.dir, "rev-parse", "HEAD"), forward.details[1].after_commit)
+end)
 H.finish()

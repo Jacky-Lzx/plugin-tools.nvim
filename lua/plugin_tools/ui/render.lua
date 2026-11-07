@@ -199,6 +199,35 @@ local function details(b, view, item, progress)
     if progress.after_commit then
       b:detail("After", progress.after_commit)
     end
+    local changes = progress.changes
+    if changes then
+      b:detail(
+        "History",
+        ("%s · %d ahead / %d behind"):format(changes.kind, changes.ahead, changes.behind),
+        (changes.kind == "rewind" or changes.kind == "diverged") and "PluginToolsWarning" or "PluginToolsName"
+      )
+      b:detail(
+        "Changes",
+        ("%d files · +%d / -%d · %d binary"):format(
+          changes.files_changed,
+          changes.insertions,
+          changes.deletions,
+          changes.binary_files
+        )
+      )
+      for _, commit in ipairs(changes.commits) do
+        b:detail("Commit", commit.commit:sub(1, 12) .. " " .. commit.subject)
+      end
+      if changes.commits_truncated then
+        b:detail("", "More commits omitted (showing 20)")
+      end
+      for _, file in ipairs(changes.files) do
+        b:detail("File", file.path .. (file.binary and " (binary)" or (" +%d / -%d"):format(file.added, file.removed)))
+      end
+      if changes.files_truncated then
+        b:detail("", "More files omitted (showing 50)")
+      end
+    end
   end
   local error_message = item.state.error or (progress and progress.error and progress.error.message)
   if error_message then
@@ -348,6 +377,21 @@ local function plugins(b, view, items, task)
         ),
         "    ",
         "PluginToolsActive"
+      )
+    end
+    if progress and task.action == "plan" and progress.changes then
+      local change = progress.changes
+      b:wrap(
+        ("%s · %d ahead / %d behind · %d files +%d / -%d"):format(
+          change.kind,
+          change.ahead,
+          change.behind,
+          change.files_changed,
+          change.insertions,
+          change.deletions
+        ),
+        "    ",
+        (change.kind == "rewind" or change.kind == "diverged") and "PluginToolsWarning" or "PluginToolsMuted"
       )
     end
     if view.expanded[item.id] then

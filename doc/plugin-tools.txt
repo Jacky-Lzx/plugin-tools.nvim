@@ -458,6 +458,13 @@ Update previews clone Git objects into temporary staging to resolve target
 refs, but do not check out files, initialize submodules, generate tags, run
 builds, replace installed directories, or write the plugin lockfile. Details
 include old/new commits, affected components, and build requirements/argv.
+Each detail's `changes` includes history kind (`install`, `unchanged`,
+`forward`, `rewind`, `diverged`), ahead/behind counts, file and line totals,
+binary file count, up to 20 commit subjects and up to 50 file summaries.
+`commits_truncated` and `files_truncated` identify omitted entries. The panel
+highlights rewinds and divergence. Expanded details list subjects and paths.
+If upstream rewrote history, comparison imports the installed revision into
+temporary staging; it never changes the installed checkout.
 Apply accepts only the latest successful plan from the same manager instance,
 validates that the source/version/build and checkout still agree, and pins the
 reviewed commit even if an upstream branch advances. Public report edits do
