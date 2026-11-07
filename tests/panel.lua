@@ -57,6 +57,8 @@ H.case("panel is searchable, preserves selection and exposes configuration detai
 end)
 
 H.case("selected updates render live progress and the operation log", function()
+  H.write(source .. "/next", "updated")
+  H.commit(source, "panel update")
   press("u")
   local task = manager.last_operation
   H.wait(task)
@@ -73,7 +75,7 @@ H.case("selected updates render live progress and the operation log", function()
   assert(vim.wait(1000, function()
     return text():find("Reviewed plan available", 1, true) ~= nil
   end))
-  assert(text():find("build: required", 1, true))
+  assert(text():find("build: none", 1, true))
   press("a")
   H.wait(manager.last_operation)
   H.eq(manager.last_plan, nil)

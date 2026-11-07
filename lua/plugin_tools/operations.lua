@@ -61,6 +61,9 @@ function M.run(manager, action, opts)
     U.check(action == "update" and not opts.ids, "apply a plan with update({plan=report}) and no ids")
     U.check(reviewed and reviewed.report == opts.plan, "plan must be the latest successful preview from this manager")
   end
+  U.check(opts.rebuild == nil or type(opts.rebuild) == "boolean", "rebuild must be boolean")
+  U.check(not opts.plan or opts.rebuild == nil, "rebuild policy is fixed by the reviewed plan")
+  local rebuild = reviewed and reviewed.rebuild or not reviewed and opts.rebuild == true
   local root, staging, swaps, locked = manager.graph.root, {}, {}, false
   local lockdir = root .. "/.operation-lock"
   local timeout = opts.timeout or manager.options.git_timeout or 120000
@@ -231,7 +234,7 @@ function M.run(manager, action, opts)
         package.id .. ": checkout differs from lockfile; use freeze() or restore() first"
       )
     end
-    if mode == "install" and exists then
+    if mode == "install" and exists and not rebuild then
       local commit = previous_commit
       U.check(
         not entry or (entry.source == package.source and entry.commit == commit),
@@ -275,17 +278,37 @@ function M.run(manager, action, opts)
       end
       revision = git(checkout, "rev-parse", "--verify", ref .. "^{commit}")
     end
-    task:emit(mode == "plan" and "resolved" or "checkout", package.id, { after_commit = revision })
+    local recipe
+    if type(package.build) == "table" then
+      recipe = package.build
+    elseif package.build == nil then
+      recipe = false
+    end
+    local unchanged = exists
+      and revision == previous_commit
+      and not rebuild
+      and recipe ~= nil
+      and vim.deep_equal(marker.build, recipe)
+    task:emit(
+      "resolved",
+      package.id,
+      { after_commit = revision, unchanged = unchanged, build = package.build ~= nil and not unchanged }
+    )
     if mode == "plan" then
       task:emit("resolved", package.id, { changes = changes(checkout, package, previous_commit, revision) })
       return { package = package, commit = revision, previous_commit = previous_commit }
     end
+    if unchanged then
+      task:emit("staged", package.id)
+      return { package = package, commit = revision, unchanged = true }
+    end
+    task:emit("checkout", package.id)
     git(checkout, "checkout", "--quiet", "--detach", revision)
     task:emit("submodules", package.id)
     git(checkout, "submodule", "update", "--init", "--recursive")
     U.write_json(
       checkout .. "/.git/plugin-tools-owner.json",
-      { id = package.id, source = package.source, commit = revision, transaction = transaction.data.id }
+      { id = package.id, source = package.source, commit = revision, transaction = transaction.data.id, build = recipe }
     )
     if package.build then
       task:emit("building", package.id)
@@ -471,7 +494,7 @@ function M.run(manager, action, opts)
     else
       local results = stage_all(packages, action, lock)
       if action == "plan" then
-        review = { ids = {}, entries = {} }
+        review = { ids = {}, entries = {}, rebuild = rebuild }
         for _, result in ipairs(results) do
           local p = result.package
           review.ids[#review.ids + 1] = p.id
@@ -492,6 +515,14 @@ function M.run(manager, action, opts)
       for _, result in ipairs(results) do
         local p = result.package
         worker_ids[coroutine.running()] = p.id
+        if result.unchanged then
+          owned(p)
+          U.check(
+            git(p.dir, "status", "--porcelain", "--untracked-files=normal") == "",
+            "local modifications in " .. p.dir
+          )
+          U.check(git(p.dir, "rev-parse", "HEAD") == result.commit, p.id .. ": checkout changed during operation")
+        end
         if not result.unchanged then
           task:emit("publishing", p.id)
           local swap = {
@@ -529,7 +560,9 @@ function M.run(manager, action, opts)
       end
     end
     transaction:target(lock)
-    U.write_json(manager.lockfile, lock)
+    if not transaction.data.before_exists or not vim.deep_equal(lock, transaction.data.before_lock) then
+      U.write_json(manager.lockfile, lock)
+    end
     transaction:phase("committed")
     for _, p in ipairs(packages) do
       local item = task.items[p.id]
@@ -542,7 +575,7 @@ function M.run(manager, action, opts)
         return p.id
       end, packages),
       lockfile = manager.lockfile,
-      restart_required = manager.started,
+      restart_required = manager.started and #swaps > 0,
     }
   end
 

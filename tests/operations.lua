@@ -239,4 +239,52 @@ H.case("source mismatch and malformed lockfile are explicit failures", function(
   H.wait(m:install(), "invalid JSON")
 end)
 
+H.case("unchanged updates skip builds and publication while rebuild and recipe changes are explicit", function()
+  local counter = H.root .. "/build-count"
+  local args = { "sh", "-c", 'printf built >> "$1"', "build", counter }
+  local same = manager({
+    root = H.root .. "/same",
+    lockfile = H.root .. "/same-lock.json",
+    specs = { { id = "source", source = source, build = args } },
+  })
+  H.wait(same:install())
+  same:start()
+  local dir = same.graph.packages.source.dir
+  local ino = vim.uv.fs_stat(dir).ino
+  local lock_stat = vim.uv.fs_stat(same.lockfile)
+  local report = H.wait(same:plan())
+  H.eq(report.details[1].build, false)
+  local applied = H.wait(same:update({ plan = report }))
+  H.eq(applied.details[1].phase, "unchanged")
+  H.eq(applied.restart_required, false)
+  H.eq(vim.uv.fs_stat(dir).ino, ino)
+  H.eq(vim.uv.fs_stat(same.lockfile).mtime, lock_stat.mtime)
+  H.eq(vim.fn.readfile(counter), { "built" })
+  H.wait(same:update({ rebuild = true }))
+  H.eq(vim.fn.readfile(counter), { "builtbuilt" })
+  same.graph.packages.source.build = vim.list_extend(vim.deepcopy(args), { "changed-recipe" })
+  H.wait(same:update())
+  H.eq(vim.fn.readfile(counter), { "builtbuiltbuilt" })
+  local marker = U.read_json(dir .. "/.git/plugin-tools-owner.json")
+  marker.build = nil
+  U.write_json(dir .. "/.git/plugin-tools-owner.json", marker)
+  H.wait(same:update())
+  H.eq(vim.fn.readfile(counter), { "builtbuiltbuiltbuilt" })
+  local calls = 0
+  same.graph.packages.source.build = function()
+    calls = calls + 1
+  end
+  H.wait(same:update())
+  H.wait(same:update())
+  H.eq(calls, 2)
+  same.graph.packages.source.build = nil
+  H.wait(same:update())
+  H.eq(U.read_json(dir .. "/.git/plugin-tools-owner.json").build, false)
+  H.eq(H.wait(same:update()).details[1].phase, "unchanged")
+  local rebuild_plan = H.wait(same:plan({ rebuild = true }))
+  H.raises(function()
+    same:update({ plan = rebuild_plan, rebuild = false })
+  end, "fixed by the reviewed plan")
+  H.eq(H.wait(same:update({ plan = rebuild_plan })).details[1].phase, "updated")
+end)
 H.finish()

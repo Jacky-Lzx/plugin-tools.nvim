@@ -8,7 +8,10 @@ function M.run(manager, args)
     assert(args[2], "usage: PluginTools explain {id}")
     manager:open({ id = args[2] })
   else
-    local plan
+    local plan, rebuild
+    if action == "rebuild" then
+      action, rebuild = "restore", true
+    end
     if action == "apply" then
       assert(#args == 1 and manager.last_plan, "run PluginTools plan first; apply takes no arguments")
       action, plan = "update", manager.last_plan
@@ -27,6 +30,7 @@ function M.run(manager, args)
       ids = ids,
       dry_run = dry_run,
       plan = plan,
+      rebuild = rebuild,
       on_complete = function(result, err)
         if not err and (action == "plan" or action == "recover") then
           manager:open()
@@ -63,6 +67,7 @@ function M.complete(manager, lead, line, cursor)
       "install",
       "update",
       "restore",
+      "rebuild",
       "freeze",
       "clean",
       "plan",
@@ -71,7 +76,7 @@ function M.complete(manager, lead, line, cursor)
     }
   elseif words[2] == "clean" or words[2] == "recover" then
     choices = { "--apply" }
-  elseif vim.list_contains({ "explain", "install", "update", "restore", "freeze", "plan" }, words[2]) then
+  elseif vim.list_contains({ "explain", "install", "update", "restore", "rebuild", "freeze", "plan" }, words[2]) then
     choices = vim.list_slice(manager.graph.order)
     if words[2] == "explain" then
       vim.list_extend(choices, vim.tbl_keys(manager.graph.inactive))

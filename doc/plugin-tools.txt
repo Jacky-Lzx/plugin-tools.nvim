@@ -404,6 +404,8 @@ KiB).
       components and builds without publishing
   `update({plan=report})` / `:PluginTools apply` — Apply the latest reviewed
       plan's exact commits
+  `restore({rebuild=true})` / `:PluginTools rebuild [ids...]` — Rebuild at
+      locked revisions even when commits and build commands are unchanged
   `restore()` / `:PluginTools restore [ids...]` — Restore selected packages to
       exact locked revisions
   `freeze()` / `:PluginTools freeze [ids...]` — Record selected existing
@@ -425,7 +427,14 @@ on_progress = function(event) ... end, on_complete = function(result, err) ...
 end }`. IDs select package owners, so selecting a component selects its shared
 checkout. Clean uses the whole graph and does not accept IDs. Manager options
 `concurrency` and `git_timeout` supply the defaults. `timeout` bounds each
-process. `commands = false` omits `:PluginTools`.
+process. `rebuild = true` forces checkout/build/publication for install,
+update or restore; plans retain their original rebuild policy. Unchanged
+updates/restores skip these steps when the recorded build command matches.
+No-build packages record false; legacy receipts and function builds are
+conservatively rebuilt because their build inputs cannot be compared. Changes
+to the external build environment require an explicit rebuild. Unchanged
+operations preserve checkout identity and an unchanged lockfile, and do not
+request a restart. `commands = false` omits `:PluginTools`.
 
 Package operations never execute plugin configuration. After installing or
 updating, restart Neovim to use new runtime files and configuration; already
