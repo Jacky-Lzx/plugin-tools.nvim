@@ -6,6 +6,8 @@ function Task.new(action, opts)
     action = action,
     done = false,
     phase = "queued",
+    cancellable = true,
+    cancel_requested = false,
     total = 0,
     completed = 0,
     items = {},
@@ -19,6 +21,30 @@ function Task.new(action, opts)
     self:subscribe(opts.on_progress)
   end
   return self
+end
+
+function Task:cancel()
+  if self.done or not self.cancellable or self.cancel_requested then
+    return false
+  end
+  self.cancel_requested = true
+  self:emit("cancelling")
+  if self._cancel then
+    self._cancel()
+  end
+  return true
+end
+
+function Task:check_cancelled()
+  if self.cancel_requested then
+    error("plugin-tools: operation cancelled", 0)
+  end
+end
+
+-- Publication/recovery and rollback must finish without interruption.
+function Task:seal()
+  self:check_cancelled()
+  self.cancellable = false
 end
 
 function Task:subscribe(callback)
@@ -110,6 +136,10 @@ function Task:snapshot()
     action = self.action,
     phase = self.phase,
     done = self.done,
+    cancellable = self.cancellable,
+    cancel_requested = self.cancel_requested,
+    cancelled = self.cancelled or false,
+    recovery_required = self.recovery_required or false,
     total = self.total,
     completed = self.completed,
     details = details,
@@ -123,13 +153,32 @@ function Task:finish(result, err)
     self:fail(nil, err)
   end
   self.done, self.error, self.finished_at = true, err, vim.uv.hrtime()
-  self.phase = err and "failed" or "done"
+  self.cancellable, self._cancel = false, nil
+  self.recovery_required = self.recovery_required or result and result.recovery_required or false
+  self.cancelled = err ~= nil
+      and self.cancel_requested
+      and not self.recovery_required
+      and self.failure
+      and tostring(self.failure.message):find("operation cancelled", 1, true) ~= nil
+    or false
+  self.phase = self.cancelled and "cancelled" or err and "failed" or "done"
+  if self.cancelled then
+    for _, item in pairs(self.items) do
+      if
+        item.phase == "failed"
+        and item.error
+        and tostring(item.error.message):find("operation cancelled", 1, true)
+      then
+        item.phase = "cancelled"
+      end
+    end
+  end
   self.report = vim.tbl_extend("force", result or { action = self.action }, self:snapshot(), {
-    status = err and "failed" or "success",
+    status = self.cancelled and "cancelled" or err and "failed" or "success",
     error = self.failure,
   })
   self.result = not err and self.report or nil
-  self:emit(err and "failed" or "done", nil)
+  self:emit(self.phase, nil)
   self.observers = {}
 end
 

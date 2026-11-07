@@ -64,7 +64,7 @@ function M.collect(manager)
     end
   end
   local previous = manager.last_operation
-  if previous and previous.done and previous.error then
+  if previous and previous.done and previous.error and not previous.cancelled then
     issue(
       "warn",
       "Last " .. previous.action .. " operation failed: " .. tostring(previous.error):match("[^\n]+"),

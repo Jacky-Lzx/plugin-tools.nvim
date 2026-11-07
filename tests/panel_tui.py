@@ -17,6 +17,7 @@ with tempfile.TemporaryDirectory(prefix="plugin-tools-panel-") as directory:
     root = Path(directory)
     stage = root / "stage"
     init = root / "init.lua"
+    cancel_ready = root / "cancel-ready"
     quote = lambda value: json.dumps(str(value))
     init.write_text(f"""
 vim.opt.rtp:prepend({quote(repo)})
@@ -26,7 +27,7 @@ local original=vim.api.nvim_get_current_buf()
 vim.api.nvim_buf_set_lines(original,0,-1,false,{{'original unsaved text'}})
 local m = require('plugin_tools').setup({{strict=false, root=H.root..'/packages', lockfile=H.root..'/lock.json', specs={{{{
  id='panel',source=source,build={{'sh','-c','sleep 0.2; printf PTY_BUILD'}}
-}}}}}})
+}},{{id='optional-template', optional=true, origin='test.optional'}}}}}})
 local view
 local function press_stage(name) vim.fn.writefile({{name}}, {quote(stage)}) end
 vim.api.nvim_create_autocmd('VimEnter', {{once=true,callback=function()
@@ -67,7 +68,23 @@ timer:start(20,20,vim.schedule_wrap(function()
   _G.narrow_checked=true;press_stage('wide')
  elseif _G.narrow_checked and vim.o.columns==120 and not _G.wide_checked then
   _G.wide_checked=true;press_stage('return')
- elseif _G.wide_checked and view.mode=='profile' then
+ elseif _G.wide_checked and view.mode=='profile' and not _G.status_requested then
+  _G.status_requested=true;press_stage('status')
+ elseif _G.status_requested and view.mode=='status' and not _G.preview_requested then
+  _G.preview_requested=true
+  H.write(source..'/next','next');H.commit(source,'PTY update summary')
+  press_stage('preview')
+ elseif _G.preview_requested and m.last_operation.action=='plan' and m.last_operation.done and text:find('forward',1,true) and not _G.preview_checked then
+  assert(text:find('PTY update summary',1,true),'commit summary missing')
+  _G.preview_checked=true;press_stage('inactive')
+ elseif _G.preview_checked and view.include_inactive and view.by_id['optional-template'] and not _G.cancel_started then
+  _G.cancel_started=true
+  m.graph.packages.panel.build={{'sh','-c','printf ready > "$1"; sleep 30','build',{quote(cancel_ready)}}}
+  press_stage('update')
+ elseif _G.cancel_started and vim.uv.fs_stat({quote(cancel_ready)}) and not _G.cancel_requested then
+  _G.cancel_requested=true;press_stage('cancel')
+ elseif _G.cancel_requested and m.last_operation.done and m.last_operation.cancelled and text:find('Operation cancelled',1,true) then
+  assert(not m.operation and m.last_operation.report.status=='cancelled')
   timer:stop();timer:close()
   press_stage('close')
   vim.defer_fn(function()
@@ -88,11 +105,11 @@ end))
                                env=env, stdin=slave, stdout=slave, stderr=slave)
     os.close(slave)
     actions = {"install": b" i", "details": b"\r", "log": b"l", "profile": b"P", "sort": b"t", "help": b"?",
-               "narrow": None, "wide": None, "return": b"?", "close": b"q"}
+               "narrow": None, "wide": None, "return": b"?", "status": b"P", "preview": b"p", "inactive": b"I", "update": b"u", "cancel": b"x", "close": b"q"}
     handled = set()
     output = bytearray()
     try:
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 20
         while process.poll() is None and time.monotonic() < deadline:
             ready, _, _ = select.select([master], [], [], 0.03)
             if ready:
@@ -111,7 +128,8 @@ end))
                     os.write(master, actions[name])
         process.wait(timeout=2)
         assert process.returncode == 0 and handled == set(actions), output.decode(errors="replace")[-5000:]
-        print("PASS panel PTY: select, progress, details, logs, startup profile, sort, help, SIGWINCH resize, close and unsaved source")
+        assert b"optional-template" in output and b"Operation cancelled" in output, output.decode(errors="replace")[-5000:]
+        print("PASS panel PTY: select, progress, details, logs, startup profile, sort, help, SIGWINCH resize, update summaries, inactive declarations, cancellation, close and unsaved source")
     finally:
         if process.poll() is None:
             process.kill()

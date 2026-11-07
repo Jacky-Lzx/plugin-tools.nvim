@@ -300,6 +300,11 @@ function M.open(manager, opts)
         view:operate(action)
       end, action)
     end
+    map("x", function()
+      if manager.operation then
+        manager.operation:cancel()
+      end
+    end, "Cancel active operation")
     map("c", function()
       view:operate("clean")
     end, "Preview cleanup")

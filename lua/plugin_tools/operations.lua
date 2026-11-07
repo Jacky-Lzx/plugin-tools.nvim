@@ -79,6 +79,22 @@ function M.run(manager, action, opts)
   local co
   local worker_ids = {}
   local transaction, keep_lock, review
+  local processes = {}
+  local grouped = vim.fn.has("win32") == 0
+  local function terminate(handle)
+    -- Dedicated Unix process groups include Git helpers and ordinary build
+    -- children. Kill before rollback can remove their working directories.
+    if grouped then
+      uv.kill(-handle.pid, 9)
+    else
+      pcall(handle.kill, handle, 9)
+    end
+  end
+  task._cancel = function()
+    for handle in pairs(processes) do
+      terminate(handle)
+    end
+  end
 
   local function resume(thread, ...)
     local ok, err = coroutine.resume(thread, ...)
@@ -90,12 +106,13 @@ function M.run(manager, action, opts)
   end
 
   local function process(argv, cwd)
+    task:check_cancelled()
     local thread = coroutine.running()
     U.check(thread, "internal process call outside operation")
     local ok, err = pcall(
       vim.system,
       argv,
-      { cwd = cwd, text = true, timeout = timeout, env = { GIT_TERMINAL_PROMPT = "0" } },
+      { cwd = cwd, text = true, timeout = timeout, detach = grouped, env = { GIT_TERMINAL_PROMPT = "0" } },
       function(result)
         vim.schedule(function()
           resume(thread, result)
@@ -104,16 +121,19 @@ function M.run(manager, action, opts)
     )
     U.check(ok, "cannot start " .. tostring(argv[1]) .. ": " .. tostring(err))
     local handle, process_key, journal_error = err
+    processes[handle] = true
     if transaction then
       process_key = tostring(handle.pid)
-      transaction.data.processes[process_key] = { pid = handle.pid, command = argv[1] }
+      transaction.data.processes[process_key] =
+        { pid = handle.pid, command = argv[1], pgid = grouped and handle.pid or nil }
       local saved, save_err = pcall(transaction.save, transaction)
       if not saved then
         journal_error = tostring(save_err)
-        handle:kill(15)
+        terminate(handle)
       end
     end
     local result = coroutine.yield()
+    processes[handle] = nil
     if process_key then
       transaction.data.processes[process_key] = nil
       local saved, save_err = pcall(transaction.save, transaction)
@@ -123,6 +143,7 @@ function M.run(manager, action, opts)
     end
     task:log(worker_ids[thread], argv, result)
     U.check(not journal_error, "cannot journal process: " .. tostring(journal_error))
+    task:check_cancelled()
     local output = result.stderr and result.stderr ~= "" and result.stderr or result.stdout or ""
     U.check(
       result.code == 0,
@@ -312,8 +333,16 @@ function M.run(manager, action, opts)
     )
     if package.build then
       task:emit("building", package.id)
+      task:check_cancelled()
       if type(package.build) == "function" then
-        package.build({ id = package.id, dir = checkout })
+        package.build({
+          id = package.id,
+          dir = checkout,
+          cancelled = function()
+            return task.cancel_requested
+          end,
+        })
+        task:check_cancelled()
       else
         process(package.build, checkout)
       end
@@ -351,7 +380,7 @@ function M.run(manager, action, opts)
     local results = {}
     for _ = 1, remaining do
       local worker = coroutine.create(function()
-        while not failed and next_index <= #packages do
+        while not failed and not task.cancel_requested and next_index <= #packages do
           local index = next_index
           next_index = index + 1
           worker_ids[coroutine.running()] = packages[index].id
@@ -376,11 +405,14 @@ function M.run(manager, action, opts)
     end
     coroutine.yield()
     U.check(not failed, tostring(failed))
+    task:check_cancelled()
     return results
   end
 
   local function execute()
+    task:check_cancelled()
     task:emit("locking")
+    task:check_cancelled()
     U.check(
       not uv.fs_lstat(root) or uv.fs_lstat(root).type == "directory",
       "refusing symlink/non-directory root " .. root
@@ -444,6 +476,7 @@ function M.run(manager, action, opts)
         return a.id < b.id
       end)
       task:select(unused)
+      task:seal()
       if opts.dry_run == false then
         for _, p in ipairs(unused) do
           worker_ids[coroutine.running()] = p.id
@@ -493,6 +526,7 @@ function M.run(manager, action, opts)
       end
     else
       local results = stage_all(packages, action, lock)
+      task:seal()
       if action == "plan" then
         review = { ids = {}, entries = {}, rebuild = rebuild }
         for _, result in ipairs(results) do
@@ -559,6 +593,7 @@ function M.run(manager, action, opts)
         lock.plugins[p.id] = { source = p.source, commit = result.commit }
       end
     end
+    task:seal()
     transaction:target(lock)
     if not transaction.data.before_exists or not vim.deep_equal(lock, transaction.data.before_lock) then
       U.write_json(manager.lockfile, lock)
@@ -586,6 +621,7 @@ function M.run(manager, action, opts)
         task:fail(worker_ids[coroutine.running()], result)
       end
       local rollback_errors = {}
+      task.cancellable = false
       task:emit("rolling_back")
       if transaction then
         local saved, err = pcall(transaction.phase, transaction, "rolling_back")
@@ -627,6 +663,7 @@ function M.run(manager, action, opts)
       end
       if #rollback_errors > 0 then
         keep_lock = true
+        task.recovery_required = true
         if transaction then
           pcall(transaction.phase, transaction, "rollback_failed")
         end
@@ -654,6 +691,7 @@ function M.run(manager, action, opts)
     end
     if locked and not keep_lock then
       if vim.fn.delete(lockdir, "rf") ~= 0 then
+        task.recovery_required = true
         if ok then
           result.recovery_required = true
         end

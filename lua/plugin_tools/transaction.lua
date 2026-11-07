@@ -167,6 +167,14 @@ function T.recover(manager, opts, git, task)
   U.check(type(data.processes) == "table", "invalid process journal")
   for _, process in pairs(data.processes) do
     U.check(not alive(process.pid), "a recorded Git/build process is still running; wait or stop it before recovery")
+    if process.pgid then
+      U.check(process.pgid == process.pid, "invalid process group journal")
+      local exists, err = uv.kill(-process.pgid, 0)
+      U.check(
+        not exists and tostring(err):find("ESRCH", 1, true),
+        "a recorded process group is still running; recovery refused"
+      )
+    end
   end
   local self = setmetatable({ data = data, path = lockdir .. "/journal.json", manager = manager }, T)
   task:select(data.swaps)
@@ -232,6 +240,7 @@ function T.recover(manager, opts, git, task)
         }
       end
     end
+    task:seal()
     if opts.dry_run == false then
       if not complete then
         self:phase("rolling_back")

@@ -4,6 +4,11 @@ function M.run(manager, args)
   local action = args[1] or "status"
   if action == "status" or action == "log" or action == "profile" then
     manager:open({ mode = action })
+  elseif action == "cancel" then
+    assert(#args == 1, "usage: PluginTools cancel")
+    if not manager.operation or not manager.operation:cancel() then
+      vim.notify("PluginTools: no cancellable operation", vim.log.levels.INFO)
+    end
   elseif action == "explain" then
     assert(args[2], "usage: PluginTools explain {id}")
     manager:open({ id = args[2] })
@@ -73,6 +78,7 @@ function M.complete(manager, lead, line, cursor)
       "plan",
       "apply",
       "recover",
+      "cancel",
     }
   elseif words[2] == "clean" or words[2] == "recover" then
     choices = { "--apply" }

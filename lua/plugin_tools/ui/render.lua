@@ -453,6 +453,7 @@ local function help(b)
         { "p", "Preview update commits and builds" },
         { "a", "Apply the reviewed plan" },
         { "I", "Show or hide inactive declarations" },
+        { "x", "Cancel the active operation before publication" },
         { "u / i", "Update / install" },
         { "s / f", "Restore locked revisions / freeze current revisions" },
       },
@@ -620,7 +621,9 @@ function M.render(view, window_width)
       { task.phase, Style.phase(task.phase) },
       { ("  ·  %d/%d packages  ·  %.1fs"):format(task.completed, task.total, elapsed / 1e9), "PluginToolsMuted" },
     })
-    if task.error then
+    if task.cancelled then
+      b:wrap("Operation cancelled; staged work rolled back.", "", "PluginToolsWarning")
+    elseif task.error then
       b:wrap(
         "Error: " .. error_text(task.failure and task.failure.message or task.error):match("[^\n]+"),
         "",
@@ -629,7 +632,7 @@ function M.render(view, window_width)
     elseif task.result and task.result.restart_required then
       b:wrap("Restart Neovim to use changed plugin files.", "", "PluginToolsWarning")
     end
-    if task.result and task.result.recovery_required then
+    if task.recovery_required or task.result and task.result.recovery_required then
       b:wrap("Cleanup needs recovery: :PluginTools recover", "", "PluginToolsWarning")
     end
     if task.action == "recover" and task.result then

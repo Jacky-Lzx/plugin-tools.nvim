@@ -41,7 +41,12 @@ end
 function M.phase(phase)
   if vim.list_contains({ "failed", "error" }, phase) then
     return "PluginToolsError"
-  elseif vim.list_contains({ "missing", "recovery_required", "recovery", "rolled_back", "rolling_back" }, phase) then
+  elseif
+    vim.list_contains(
+      { "missing", "recovery_required", "recovery", "rolled_back", "rolling_back", "cancelling", "cancelled" },
+      phase
+    )
+  then
     return "PluginToolsWarning"
   elseif
     vim.list_contains({

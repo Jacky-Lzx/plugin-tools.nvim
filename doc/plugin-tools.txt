@@ -378,6 +378,19 @@ directories, but an explicit activation of a missing plugin still fails.
 Async package methods return a task with `done`, `result`, `error`, and
 `task:wait(timeout_ms)`. `wait()` pumps the event loop; a wait timeout does
 not cancel or unlock the ongoing operation. Inspect the task or wait again.
+`task:cancel()` requests cancellation and returns true once, or false when
+already cancelled, finished or publishing/rolling back. `:PluginTools cancel`
+and panel key x request the same action. Cancellation stops new staging work,
+terminates active managed processes, waits for workers, then rolls back and
+cleans staging. A cancelled wait returns `nil, error`; `task.report.status`
+is `cancelled`, unless rollback failed and recovery is required. Snapshots
+include `cancellable`, `cancel_requested`, `cancelled`, and `recovery_required`.
+Publication and applied recovery cannot be cancelled; allow them to finish.
+On Unix each managed command has its own process group, which cancellation
+kills including ordinary children. Windows terminates direct child processes.
+Build functions receive `ctx.cancelled()` for cooperative checks; synchronous
+Lua work and processes started independently by callbacks cannot be interrupted
+by this API. Build callbacks should not leave detached background workers.
 
 `on_progress(event)` receives isolated phase events while an operation runs:
 `checking`, `cloning`, `checkout`, `submodules`, `building`, `helptags`,
