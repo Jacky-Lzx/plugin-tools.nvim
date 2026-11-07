@@ -15,7 +15,13 @@ function M.options(history, base, extra, declaration, prefix)
   for _, key in ipairs(keys) do
     local value = extra[key]
     local path = vim.list_extend(vim.list_slice(prefix), { key })
-    if type(value) == "table" and next(value) and not vim.islist(value) and type(base[key]) == "table" then
+    if
+      type(value) == "table"
+      and next(value)
+      and not vim.islist(value)
+      and type(base[key]) == "table"
+      and not vim.islist(base[key])
+    then
       M.options(history, base[key], value, declaration, path)
     else
       history[#history + 1] = {

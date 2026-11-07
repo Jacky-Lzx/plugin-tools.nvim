@@ -118,7 +118,13 @@ end
 -- place while lists and explicit empty tables replace the previous key.
 function M.merge_into(base, extra)
   for key, value in pairs(extra) do
-    if type(value) == "table" and next(value) and not vim.islist(value) and type(base[key]) == "table" then
+    if
+      type(value) == "table"
+      and next(value)
+      and not vim.islist(value)
+      and type(base[key]) == "table"
+      and not vim.islist(base[key])
+    then
       M.merge_into(base[key], value)
     else
       base[key] = vim.deepcopy(value)

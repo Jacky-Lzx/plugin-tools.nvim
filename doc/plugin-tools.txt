@@ -262,8 +262,9 @@ may have their own `main`, configuration, and explicit activation.
 
 IDs are global. Repeated declarations of an ID share one node and package.
 Scalar fields must agree. Options merge in declaration order: maps merge
-recursively; lists replace; an empty table clears that key. Dependencies
-combine, with required references taking precedence over optional references.
+recursively only with existing maps; lists and type changes replace; an empty
+table clears that key. Dependencies combine, with required references taking
+precedence over optional references.
 Children do not inherit the parent's arbitrary options. A disabled declaration
 does not veto another enabled declaration of the same shared plugin.
 

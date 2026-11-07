@@ -19,6 +19,31 @@ H.case("private graph merges preserve declaration and node isolation", function(
   H.eq(resolve(specs).nodes.b.opts.nested.list, { 99, 2 })
 end)
 
+H.case("option type changes replace prior values and preserve replacement history", function()
+  local cases = {
+    { { "old" }, { new = true } },
+    { { old = true }, { "new" } },
+    { false, { new = true } },
+    { { old = true }, false },
+    { { "old" }, {} },
+    { {}, { new = true } },
+  }
+  for _, values in ipairs(cases) do
+    local m = Tools.new({
+      specs = {
+        { id = "changed", dir = H.root, opts = { value = values[1] } },
+        { id = "changed", origin = "override", opts = { value = values[2] } },
+      },
+    })
+    local info = m:explain("changed")
+    H.eq(info.opts.value, values[2])
+    local change = info.option_history[#info.option_history]
+    H.eq(change.path, { "value" })
+    H.eq(change.operation, type(values[2]) == "table" and not next(values[2]) and "clear" or "replace")
+    H.eq(change.origin, "override")
+  end
+end)
+
 H.case("contexts copy opts once on demand and remain isolated", function()
   local unused, used
   local source = { nested = { value = 1 } }
