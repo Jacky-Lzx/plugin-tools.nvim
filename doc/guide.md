@@ -7,6 +7,10 @@ The examples here illustrate particular workflows.
 
 ## Installation details
 
+The [README bootstrap example](../README.md#installation) provides automatic
+first installation and self updates. For an existing local checkout or manual
+installation, use the explicit setup below.
+
 Add this checkout to `runtimepath` in `init.lua`, before native plugin loading:
 
 ```lua
@@ -48,6 +52,59 @@ Then start Neovim normally. Alternatively, temporarily set `strict = false`, run
 `:PluginTools install`, wait for completion, and restart. Missing plugins are
 reported as `missing`, and skipped in permissive mode. Strict startup is the
 default and checks every directory before changing `runtimepath`.
+
+## Bootstrap and self updates
+
+The standalone `bootstrap.lua` entry point runs before any `plugin_tools` module
+is loaded. Its `setup(options)` returns the configured manager and adds a managed
+`plugin-tools.nvim` package to your declarations. It does not call setup on itself.
+Use this entry point on every startup; do not also call `plugin_tools.setup()`.
+
+On the first run, the README loader clones a disposable seed. Bootstrap uses that
+seed's package operations to install the official checkout and all selected
+packages, honoring an existing lockfile. Seed modules are unloaded before setup
+loads the installed version. Git clone or installation failures stop startup;
+the seed is removed by the loader, and the normal transaction protects packages
+and lock revisions. A failed first installation can be retried. An interrupted
+transaction can require explicit recovery as described below; bootstrap never
+deletes operation locks to retry automatically.
+
+If an interrupted first install prevents normal startup, clone a separate
+recovery checkout and use its `examples/manage.lua` with `recover`, then
+`recover --apply`. The manifest only needs the same `root` and `lockfile` and
+`specs = {}`; recovery validates the recorded transaction independently of the
+current declarations. Retry the normal bootstrap after recovery completes.
+
+After installation, startup loads `root/plugin-tools.nvim/bootstrap.lua` directly.
+It does not run Git, read the lockfile, check updates or install newly declared
+packages. Use `strict = false` and `:PluginTools install` for later additions, then
+restart. Use `:PluginTools plan plugin-tools.nvim` and `:PluginTools apply` to
+review and apply a self update; the ordinary update, restore and freeze commands
+also support this package. The running session retains the previous Lua modules
+until restart, including modules that had not been loaded before the update.
+
+To use a mirror, change the seed clone URL in the README loader and pass the
+matching `self.source`. `self.version` selects the managed branch/tag for updates
+and unlocked installs:
+
+```lua
+return dofile(path .. "/bootstrap.lua").setup({
+  self = { source = "https://example.org/plugin-tools.nvim.git", version = "main" },
+  specs = {},
+})
+```
+
+The seed must contain this bootstrap entry point, even when the lockfile pins a
+different revision for installation. Installed revisions must also support this
+entry point for subsequent startup. For a private mirror, configure normal Git
+authentication before installation.
+
+When migrating a manual installation, remove its old runtimepath/package loading
+entry and use the README loader. Bootstrap installs a separate owned copy under
+`root`; it does not adopt or delete the manual checkout. Remove an old native
+`pack/*/start/` copy from package discovery to keep one runtime owner. Local
+development through ordinary `setup()` with `dir` remains available and is
+excluded from remote updates.
 
 ## Composition and activation
 

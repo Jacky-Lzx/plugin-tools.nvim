@@ -420,6 +420,11 @@ function M.run(manager, action, opts)
     U.mkdir(root)
     if action == "recover" then
       U.check(not opts.ids, "recover does not accept ids")
+      if opts.dry_run == false then
+        for _, package in pairs(manager.graph.packages) do
+          require("plugin_tools.session").preserve(package)
+        end
+      end
       return require("plugin_tools.transaction").recover(manager, opts, git, task)
     end
     local acquired, err = uv.fs_mkdir(lockdir, 448)
@@ -546,6 +551,11 @@ function M.run(manager, action, opts)
       end
       -- All builds succeeded. Publish complete directories, retaining backups
       -- until the lockfile's atomic replacement succeeds.
+      for _, result in ipairs(results) do
+        if not result.unchanged then
+          require("plugin_tools.session").preserve(result.package)
+        end
+      end
       for _, result in ipairs(results) do
         local p = result.package
         worker_ids[coroutine.running()] = p.id

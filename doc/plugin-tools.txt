@@ -13,8 +13,9 @@ CONTENTS                                                        *plugin-tools*
 ==============================================================================
 QUICK START                                          *plugin-tools-quickstart*
 
-Requires Neovim 0.11+. Git is required for package operations. Startup does
-not download packages.
+Requires Neovim 0.11+. Git is required for package operations. Ordinary setup
+does not download packages. The opt-in bootstrap installs on its first run;
+see |plugin-tools-bootstrap| and the init.lua loader in README.md.
 
 >lua
     require("plugin_tools").setup({ specs = {} })
@@ -50,6 +51,40 @@ Alternatively, strict=false permits startup with missing directories. If
 startup fails after manager creation, status, health checks and package
 commands remain available; initialization errors are retained and are not
 automatically retried.
+
+BOOTSTRAP                                             *plugin-tools-bootstrap*
+
+The standalone dofile(path .. "/bootstrap.lua").setup(options) entry point
+returns the default manager. Call it during init.lua before loading any
+plugin_tools modules, instead of calling plugin_tools.setup() separately.
+The README loader obtains a temporary seed only if root/plugin-tools.nvim is
+absent, and removes that seed on success or failure.
+
+options accepts the ordinary manager options and a bootstrap-only self table:
+  self.source   Git source; defaults to "Jacky-Lzx/plugin-tools.nvim"
+  self.version  Optional branch, tag, commit or ref; defaults to remote HEAD
+
+An existing lockfile takes precedence over self.version during installation.
+Update explicitly to move to the selected version.
+
+The id "plugin-tools.nvim" is reserved in bootstrap declarations, including
+children. Bootstrap prepends this managed package with dev=false and
+config=false; global dev overrides do not redirect it to an external checkout.
+Input options are copied. self is consumed before manager creation.
+
+If the self package is absent, bootstrap explicitly installs all selected
+packages through new(options):install():wait(), honoring the lockfile, before
+starting the installed version. It clears seed modules and restores the
+runtimepath before loading the managed copy. Errors are raised; an interrupted
+transaction may need recovery. The seed and installed versions must both
+support this bootstrap entry point. Existing unowned checkouts are not adopted.
+
+If the self package exists, bootstrap only sets up the manager: no Git,
+lockfile reads, update checks or downloads. Later missing packages use the
+normal install workflow. Self updates use the same plan/apply, update,
+restore and freeze operations and ownership checks as other packages.
+The running session keeps the old Lua modules until restart. Do not manually
+clear package.loaded entries to reload the updated manager in place.
 
 COMPOSITION                                         *plugin-tools-composition*
 
