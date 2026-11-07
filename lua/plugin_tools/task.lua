@@ -1,6 +1,26 @@
+---@class plugin_tools.Task
+---@field action plugin_tools.Action
+---@field done boolean
+---@field phase string
+---@field cancellable boolean
+---@field cancel_requested boolean
+---@field cancelled? boolean
+---@field recovery_required? boolean
+---@field total integer
+---@field completed integer
+---@field items table<string, plugin_tools.PackageProgress>
+---@field order string[]
+---@field events plugin_tools.ProgressEvent[]
+---@field result? plugin_tools.OperationReport Successful report after completion.
+---@field report? plugin_tools.OperationReport Final report, including failure/cancellation.
+---@field error? string Failure/traceback after completion.
+---@field failure? plugin_tools.Failure
 local Task = {}
 Task.__index = Task
 
+---@param action plugin_tools.Action
+---@param opts plugin_tools.OperationOptions
+---@return plugin_tools.Task
 function Task.new(action, opts)
   local self = setmetatable({
     action = action,
@@ -23,6 +43,8 @@ function Task.new(action, opts)
   return self
 end
 
+---Request cancellation before publication; returns false after the safe boundary.
+---@return boolean accepted
 function Task:cancel()
   if self.done or not self.cancellable or self.cancel_requested then
     return false
@@ -47,6 +69,9 @@ function Task:seal()
   self.cancellable = false
 end
 
+---Subscribe to future isolated progress events; callbacks are removed on completion.
+---@param callback fun(event: plugin_tools.ProgressEvent)
+---@return fun() unsubscribe
 function Task:subscribe(callback)
   assert(type(callback) == "function", "plugin-tools: progress listener must be a function")
   self.observers[callback] = true
@@ -127,6 +152,7 @@ function Task:complete(id, phase)
   self:emit(phase, id)
 end
 
+---@return plugin_tools.OperationSnapshot
 function Task:snapshot()
   local details = {}
   for _, id in ipairs(self.order) do
@@ -182,6 +208,10 @@ function Task:finish(result, err)
   self.observers = {}
 end
 
+---Wait for completion; a timeout does not cancel the operation.
+---@param milliseconds? number Wait limit in milliseconds (default 300000).
+---@return plugin_tools.OperationReport? result
+---@return string? err
 function Task:wait(milliseconds)
   local finished = self.done or vim.wait(milliseconds or 300000, function()
     return self.done

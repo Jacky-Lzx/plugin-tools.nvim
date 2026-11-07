@@ -1,7 +1,25 @@
 local U = require("plugin_tools.util")
+---@class plugin_tools.Manager
+---@field options plugin_tools.Options
+---@field started boolean
+---@field lockfile string
+---@field timings plugin_tools.Timings
+---@field last_operation? plugin_tools.Task
+---@field operation? plugin_tools.Task
+---@field last_plan? plugin_tools.OperationReport
+---@field install fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Install absent managed packages at locked revisions.
+---@field update fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Stage and publish source revisions, or apply a reviewed plan.
+---@field restore fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Restore selected packages to locked revisions.
+---@field freeze fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Record current clean checkout revisions in the lockfile.
+---@field clean fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Preview unused managed packages; dry_run=false removes them.
+---@field plan fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Preview exact update revisions, builds and Git changes.
+---@field recover fun(self: plugin_tools.Manager, opts?: plugin_tools.OperationOptions): plugin_tools.Task Preview an interrupted transaction; dry_run=false applies recovery.
 local Manager = {}
 Manager.__index = Manager
 
+---Create an isolated manager without mounting plugins or registering commands.
+---@param opts? plugin_tools.Options
+---@return plugin_tools.Manager
 function Manager.new(opts)
   U.check(vim.fn.has("nvim-0.11") == 1, "Neovim 0.11+ is required")
   assert(opts == nil or type(opts) == "table", "plugin-tools: new expects a table")
@@ -21,6 +39,9 @@ function Manager.new(opts)
   return self
 end
 
+---Check availability without activation.
+---@param id string
+---@return boolean
 function Manager:has(id)
   local state = self.states[id]
   return state ~= nil and state.phase ~= "missing"
@@ -38,6 +59,8 @@ local context_meta = {
   end,
 }
 
+---@private
+---@return plugin_tools.Context
 function Manager:_context(n)
   local ctx = {
     id = n.id,
@@ -67,6 +90,8 @@ function Manager:_context(n)
   return setmetatable(ctx, context_meta)
 end
 
+---Check/install missing packages, mount runtimes and activate startup declarations once.
+---@return plugin_tools.Manager
 function Manager:start()
   U.check(not self.start_error, "previous startup failed: " .. tostring(self.start_error))
   if self.started then
@@ -107,6 +132,10 @@ local function trigger(manager, id, cause)
   return cause, reason
 end
 
+---Mount a runtime and its native scripts without calling plugin setup.
+---@param id string
+---@param cause? plugin_tools.Trigger
+---@return plugin_tools.Manager
 function Manager:mount(id, cause)
   U.check(self.started, "call start() before mounting")
   local ok, err = pcall(self.runtime.mount, self.runtime, id)
@@ -125,6 +154,10 @@ function Manager:mount(id, cause)
   return self
 end
 
+---Initialize a declared plugin once, after its explicit prerequisites.
+---@param id string
+---@param cause? plugin_tools.Trigger
+---@return plugin_tools.Manager
 function Manager:activate(id, cause)
   U.check(self.started, "call start() before activation")
   local n, state = self.graph.nodes[id], self.states[id]
@@ -166,6 +199,10 @@ function Manager:activate(id, cause)
   return self
 end
 
+---Activate a plugin and return its declared main module.
+---@param id string
+---@param cause? plugin_tools.Trigger
+---@return any
 function Manager:use(id, cause)
   self:activate(id, cause)
   local n = self.graph.nodes[id]
@@ -173,6 +210,9 @@ function Manager:use(id, cause)
   return require(n.main)
 end
 
+---Return copied plugin state; no Git commands or lockfile reads.
+---@param opts? plugin_tools.StatusOptions
+---@return plugin_tools.Status[]
 function Manager:status(opts)
   local out = {}
   for _, id in ipairs(self.graph.order) do
@@ -199,6 +239,8 @@ function Manager:status(opts)
   return out
 end
 
+---Return copied startup timings and plugin states.
+---@return plugin_tools.Profile
 function Manager:profile()
   local timings = vim.deepcopy(self.timings)
   if timings.enabled and not timings.complete and self._start_at then
@@ -211,14 +253,22 @@ function Manager:profile()
   return { timings = timings, plugins = self:status() }
 end
 
+---Inspect package/lock/recovery health without modifying checkouts.
+---@return plugin_tools.Diagnostic[]
 function Manager:diagnostics()
   return require("plugin_tools.diagnostics").collect(self)
 end
 
+---Open or focus the manager panel.
+---@param opts? plugin_tools.OpenOptions
+---@return table view
 function Manager:open(opts)
   return require("plugin_tools.ui").open(self, opts)
 end
 
+---Return a copied declaration, dependency and option merge explanation.
+---@param id string
+---@return plugin_tools.Explanation
 function Manager:explain(id)
   local n = self.graph.nodes[id]
   if not n and self.graph.inactive[id] then

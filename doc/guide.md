@@ -127,6 +127,35 @@ entry and use the README loader. Bootstrap installs a separate owned copy under
 development through ordinary `setup()` with `dir` remains available and is
 excluded from remote updates.
 
+## Typed configuration
+
+`setup()` and `new()` provide LuaLS completion for inline options, recursive
+specs, `config(ctx)` and `build(ctx)`. Manager methods, operation callbacks and
+tasks also carry LuaDoc signatures. Separate configuration modules can declare
+one of these types:
+
+```lua
+---@module "plugin_tools"
+---@type plugin_tools.BootstrapOptions
+local opts = { auto_install = true, specs = {} }
+return opts
+```
+
+Use `plugin_tools.Options` for direct `setup()`/`new()` calls without bootstrap's
+`self`, or `plugin_tools.Spec[]` for a module returning declarations. Plugin-specific
+`opts` stays an open table; annotate it with that plugin's own options type when
+available.
+
+LuaLS must index this checkout's `lua/` directory. The `@module` hint names the
+library without executing `require()`; editors with on-demand module discovery
+can use it. If your editor does not discover plugin libraries, add the installed
+`<root>/plugin-tools.nvim/lua` directory to `Lua.workspace.library` and restart
+LuaLS. Annotations do not load the manager at runtime.
+
+To verify completion and valid/invalid configuration diagnostics with a local
+`lua-language-server` executable, run `python3 tests/run.py lsp`. This optional
+integration suite is separate from the default runtime tests.
+
 ## Composition and activation
 
 The following illustrative manifest shows both forms of nesting:

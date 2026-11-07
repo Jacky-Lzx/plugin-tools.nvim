@@ -67,6 +67,8 @@ if not ok then error(manager, 0) end
 
 ```lua
 -- lua/plugins.lua
+---@module "plugin_tools"
+---@type plugin_tools.BootstrapOptions
 local opts = {
   -- Options for plugin-tools.nvim itself.
   root = vim.fn.stdpath("data") .. "/plugin-tools",
@@ -96,6 +98,8 @@ The top-level `opts` configures plugin-tools.nvim; each declaration's `opts`
 configures that plugin. Bootstrap registers plugin-tools.nvim automatically, so
 do not add it to `specs`. `self` selects its managed source and revision.
 With this example, `:FileTools toggle` opens the configured file tree.
+The annotations enable LuaLS field and callback completion once the plugin's
+`lua/` directory is indexed; see [typed configuration](doc/guide.md#typed-configuration).
 
 The temporary clone installs the managed copy and declared packages through the
 normal transaction and lockfile workflow, then is removed. Subsequent startups

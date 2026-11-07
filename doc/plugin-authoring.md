@@ -21,6 +21,7 @@ installation is separate from plugin package management.
 
 ### Modules and configuration
 
+- Annotate public options, callback contexts and APIs with LuaDoc for editor completion.
 - Keep public entry points small, implementation helpers private and mutable state
   local. Document the actual Lua module name, option types and return values.
 - Validate options before changing live resources. Copy caller-owned tables and

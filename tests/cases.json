@@ -520,6 +520,25 @@
         "tests/cancel.lua"
       ],
       "timeout": 45
+    },
+    {
+      "name": "lua_ls",
+      "suite": "lsp",
+      "command": [
+        "{nvim}",
+        "--headless",
+        "-u",
+        "NONE",
+        "-i",
+        "NONE",
+        "--noplugin",
+        "-l",
+        "tests/lsp.lua"
+      ],
+      "files": [
+        "tests/lsp.lua"
+      ],
+      "timeout": 120
     }
   ],
   "support": {

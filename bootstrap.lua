@@ -7,6 +7,9 @@ local function prepend(path)
   vim.o.runtimepath = vim.fn.escape(path, ",\\") .. "," .. vim.o.runtimepath
 end
 
+---Install/load the managed manager before any plugin_tools module is required.
+---@param options? plugin_tools.BootstrapOptions
+---@return plugin_tools.Manager
 function M.setup(options)
   assert(vim.fn.has("nvim-0.11") == 1, "plugin-tools: Neovim 0.11+ is required")
   assert(options == nil or type(options) == "table", "plugin-tools: bootstrap expects a table")

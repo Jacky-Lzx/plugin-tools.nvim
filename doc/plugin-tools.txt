@@ -7,6 +7,7 @@ CONTENTS                                                        *plugin-tools*
   Commands            |plugin-tools-commands|
   Options             |plugin-tools-options|
   Lua API             |plugin-tools-api|
+  Typed configuration |plugin-tools-types|
   Lifecycle           |plugin-tools-lifecycle|
   Plugin authoring    |plugin-tools-authoring|
   Troubleshooting     |plugin-tools-troubleshooting|
@@ -243,6 +244,21 @@ manual inspection; see README.md.
 Options: specs, root, lockfile, dev={path=...,fallback=true}, url_format,
 auto_install=true, strict=true, commands=true, concurrency=4,
 git_timeout=120000, profile=true.
+
+TYPED CONFIGURATION                                   *plugin-tools-types*
+
+setup()/new() options, plugin declarations, contexts, manager methods and tasks
+include LuaDoc signatures. For a configuration module, annotate its returned table:
+>lua
+  ---@module "plugin_tools"
+  ---@type plugin_tools.BootstrapOptions
+  local opts = { auto_install = true, specs = {} }
+  return opts
+<
+Use plugin_tools.Options for direct setup()/new() without bootstrap's self, and
+plugin_tools.Spec[] for declaration lists. LuaLS must index this plugin's lua/
+directory (add it to Lua.workspace.library if necessary). Plugin-specific opts
+remain open tables; use the individual plugin's option type for those fields.
 
 PROFILING                                               *plugin-tools-profile*
 
