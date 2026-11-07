@@ -100,6 +100,7 @@ function M.resolve(specs, opts)
       parent = parent and parent.id,
       enabled = enabled,
       optional = spec.optional == true,
+      selection = not enabled and "disabled" or item.selected and "selected" or "unselected",
       fields = {},
     }
     for key in pairs(spec) do
@@ -317,7 +318,46 @@ function M.resolve(specs, opts)
   for _, id in ipairs(order) do
     visit(id)
   end
+  local inactive = {}
+  for id, contributions in pairs(declarations) do
+    if not nodes[id] then
+      local phase = unselected[id] and "unselected" or "disabled"
+      local parents, root = {}, false
+      for _, declaration in ipairs(contributions) do
+        if declaration.parent then
+          parents[declaration.parent] = true
+        else
+          root = true
+        end
+      end
+      inactive[id] = {
+        id = id,
+        package = id,
+        dir = "",
+        managed = false,
+        selected = false,
+        parents = vim.tbl_keys(parents),
+        root = root,
+        declarations = contributions,
+        dependencies = {},
+        after = {},
+        ft = {},
+        opts = {},
+        option_history = {},
+        referenced_by = {},
+        mount = "none",
+        start = false,
+        state = {
+          phase = phase,
+          reason = phase == "disabled" and "all declarations disabled"
+            or "optional declaration has no enabled selector",
+        },
+      }
+      table.sort(inactive[id].parents)
+    end
+  end
   return {
+    inactive = inactive,
     nodes = nodes,
     order = order,
     activation_order = sorted,

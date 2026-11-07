@@ -57,6 +57,9 @@ local function piece(value, available)
 end
 
 local function home(path)
+  if not path or path == "" then
+    return "Not selected"
+  end
   local directory = vim.uv.os_homedir()
   return directory
       and (path == directory or vim.startswith(path, directory .. "/"))
@@ -165,6 +168,9 @@ local function details(b, view, item, progress)
   end
   if state.reason or state.mount_reason then
     b:detail("Trigger", state.reason or state.mount_reason)
+  end
+  if state.trigger and #state.trigger.chain > 1 then
+    b:detail("Trigger chain", table.concat(state.trigger.chain, " → "))
   end
   b:detail("Directory", home(info.dir), "PluginToolsPath")
   if info.package ~= info.id then
@@ -310,7 +316,7 @@ local function plugins(b, view, items, task)
     if c.source then
       parts[#parts + 1] = { "  " }
       parts[#parts + 1] = {
-        pad(item.managed and "managed" or "local", c.source),
+        pad(item.selected == false and "inactive" or item.managed and "managed" or "local", c.source),
         item.managed and "PluginToolsPath" or "PluginToolsMuted",
       }
     end
@@ -402,6 +408,7 @@ local function help(b)
       {
         { "p", "Preview update commits and builds" },
         { "a", "Apply the reviewed plan" },
+        { "I", "Show or hide inactive declarations" },
         { "u / i", "Update / install" },
         { "s / f", "Restore locked revisions / freeze current revisions" },
       },
@@ -490,6 +497,9 @@ function M.render(view, window_width)
   }, Builder)
   local report = view.manager:profile()
   local items, task = report.plugins, view.manager.last_operation
+  if view.include_inactive and view.mode ~= "profile" then
+    items = view.manager:status({ include_inactive = true })
+  end
   b:line()
   b:line({
     { "Plugins", view.mode == "status" and "PluginToolsTabActive" or "PluginToolsTab" },
@@ -503,7 +513,7 @@ function M.render(view, window_width)
   for _, item in ipairs(items) do
     counts[item.state.phase] = (counts[item.state.phase] or 0) + 1
   end
-  for _, phase in ipairs({ "failed", "missing", "ready", "mounted", "registered" }) do
+  for _, phase in ipairs({ "failed", "missing", "ready", "mounted", "registered", "disabled", "unselected" }) do
     if counts[phase] then
       summary[#summary + 1] = { "  ·  ", "PluginToolsMuted" }
       summary[#summary + 1] = { counts[phase] .. " " .. phase, Style.phase(phase) }

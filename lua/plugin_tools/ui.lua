@@ -165,6 +165,12 @@ function View:operate(action, opts)
       return
     end
     table.sort(ids)
+    for _, id in ipairs(ids) do
+      if not self.manager.graph.nodes[id] then
+        vim.notify("PluginTools: " .. id .. " is inactive; enable it in the manifest first", vim.log.levels.WARN)
+        return
+      end
+    end
     opts.ids = ids
   end
   local ok, task = pcall(self.manager[action], self.manager, opts)
@@ -269,6 +275,10 @@ function M.open(manager, opts)
         view:render()
       end
     end, "Full configuration")
+    map("I", function()
+      view.include_inactive = not view.include_inactive
+      view:render()
+    end, "Toggle inactive declarations")
     map("P", function()
       view.mode = view.mode == "profile" and "status" or "profile"
       view:render()
@@ -346,7 +356,8 @@ function M.open(manager, opts)
   end
   view.mode = opts.mode or "status"
   if opts.id then
-    manager:explain(opts.id)
+    local info = manager:explain(opts.id)
+    view.include_inactive = info.selected == false or view.include_inactive
     view.expanded[opts.id], view.filter = true, opts.id
   end
   local win = view:window()

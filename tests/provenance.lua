@@ -65,4 +65,70 @@ H.case("nested contributions inherit their own declaring module", function()
   H.eq(info.declarations[2].origin, "second")
   H.eq(info.declarations[2].parent, "parent")
 end)
+H.case("inactive declarations remain explainable without evaluating dormant children", function()
+  local calls = 0
+  local m = Tools.new({
+    specs = {
+      { id = "off", enabled = false, origin = "disabled.module" },
+      {
+        id = "optional",
+        optional = true,
+        origin = "optional.module",
+        children = {
+          {
+            id = "untouched",
+            enabled = function()
+              calls = calls + 1
+              return true
+            end,
+          },
+        },
+      },
+    },
+  })
+  H.eq(m:status(), {})
+  H.eq(#m:status({ include_inactive = true }), 2)
+  H.eq(m:explain("off").state.phase, "disabled")
+  H.eq(m:explain("off").declarations[1].origin, "disabled.module")
+  local info = m:explain("optional")
+  H.eq(info.state.phase, "unselected")
+  H.eq(info.declarations[1].selection, "unselected")
+  info.declarations[1].origin = "changed"
+  H.eq(m:explain("optional").declarations[1].origin, "optional.module")
+  H.eq(calls, 0)
+  H.raises(function()
+    m:explain("untouched")
+  end, "unknown plugin")
+  local completions = require("plugin_tools.command").complete(m, "off", "PluginTools explain off", 23)
+  H.eq(completions, { "off" })
+  local view = m:open({ id = "optional" })
+  local text = table.concat(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false), "\n")
+  assert(text:find("optional.module", 1, true) and text:find("unselected", 1, true))
+  vim.api.nvim_win_close(view.win, true)
+end)
+
+H.case("activation traces retain callers and explicit ordering prerequisites", function()
+  local m = Tools.new({
+    profile = false,
+    specs = {
+      {
+        id = "a",
+        dir = H.root,
+        dependencies = { "b" },
+        config = function(ctx)
+          ctx.activate("b")
+        end,
+      },
+      { id = "b", dir = H.root, start = false, after = { "c" } },
+      { id = "c", dir = H.root, start = false },
+    },
+  }):start()
+  H.eq(m:explain("a").state.trigger.kind, "startup")
+  H.eq(m:explain("b").state.reason, "ctx.activate from a")
+  H.eq(m:explain("b").state.trigger.chain, { "a", "b" })
+  H.eq(m:explain("c").state.trigger.chain, { "a", "b", "c" })
+  H.eq(m:explain("c").state.trigger.kind, "after")
+  m:activate("b")
+  H.eq(m:explain("b").state.trigger.parent, "a")
+end)
 H.finish()

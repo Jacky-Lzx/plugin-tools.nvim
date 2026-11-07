@@ -60,7 +60,7 @@ function M.phase(phase)
     }, phase)
   then
     return "PluginToolsReady"
-  elseif phase == "registered" or phase == "queued" then
+  elseif phase == "registered" or phase == "queued" or phase == "disabled" or phase == "unselected" then
     return "PluginToolsPending"
   end
   return "PluginToolsActive"

@@ -341,6 +341,15 @@ methods forward to that manager. `new(options)` creates an independent
 instance without mounting or initializing anything; call `manager:start()`
 when ready. Start is idempotent.
 
+Inspection includes reachable disabled and unselected optional declarations:
+`explain(id)` returns their `disabled` or `unselected` state and declaration
+origins. Dormant children remain unevaluated and are not discovered.
+`status({include_inactive=true})` includes these records; plain `status()`
+continues to return selected nodes only. Press I in the panel to toggle them.
+Inactive records have `selected=false`, an empty directory and no runtime.
+Activation state includes a `trigger` with kind, parent/action or filetype
+where applicable, and the activation chain. First activation retains its cause.
+
 Synchronous inspection/runtime methods:
 
 >lua

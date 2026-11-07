@@ -44,15 +44,15 @@ function Manager:_context(n)
     end,
     use = function(id)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
-      return self:use(id)
+      return self:use(id, { kind = "dependency", parent = n.id, action = "use" })
     end,
     mount = function(id)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
-      return self:mount(id)
+      return self:mount(id, { kind = "dependency", parent = n.id, action = "mount" })
     end,
     activate = function(id)
       U.check(n.dependencies[id] ~= nil, n.id .. ": undeclared dependency " .. id)
-      return self:activate(id)
+      return self:activate(id, { kind = "dependency", parent = n.id, action = "activate" })
     end,
   }
   if not next(n.opts) then
@@ -96,7 +96,7 @@ function Manager:_start()
   for _, id in ipairs(self.graph.activation_order) do
     if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
       self.states[id].reason = "startup"
-      local ok, err = pcall(self.activate, self, id)
+      local ok, err = pcall(self.activate, self, id, { kind = "startup" })
       if not ok then
         self.start_error = err
         U.fail(err)
@@ -119,7 +119,20 @@ function Manager:_watch_filetypes()
   end
 end
 
-function Manager:mount(id)
+local function trigger(manager, id, cause)
+  cause = vim.deepcopy(cause or { kind = "explicit" })
+  local parent = cause.parent and manager.states[cause.parent]
+  local previous = parent and parent.trigger
+  cause.chain = vim.deepcopy(previous and previous.chain or (cause.parent and { cause.parent } or {}))
+  cause.chain[#cause.chain + 1] = id
+  local reason = cause.kind == "dependency" and ("ctx." .. cause.action .. " from " .. cause.parent)
+    or cause.kind == "after" and ("after prerequisite of " .. cause.parent)
+    or cause.kind == "filetype" and ("FileType " .. cause.filetype)
+    or cause.kind
+  return cause, reason
+end
+
+function Manager:mount(id, cause)
   U.check(self.started, "call start() before mounting")
   local ok, err = pcall(self.runtime.mount, self.runtime, id)
   if not ok then
@@ -130,11 +143,14 @@ function Manager:mount(id)
     error(err, 0)
   end
   local state = self.states[id]
-  state.mount_reason = state.reason or "explicit mount"
+  if not state.mount_trigger then
+    state.mount_trigger, state.mount_reason = trigger(self, id, cause or state.trigger)
+    state.mount_reason = cause and state.mount_reason or state.reason or "explicit mount"
+  end
   return self
 end
 
-function Manager:activate(id)
+function Manager:activate(id, cause)
   U.check(self.started, "call start() before activation")
   local n, state = self.graph.nodes[id], self.states[id]
   U.check(n, "unknown plugin " .. tostring(id))
@@ -144,12 +160,12 @@ function Manager:activate(id)
   U.check(state.phase ~= "missing", id .. ": plugin directory is missing")
   U.check(state.phase ~= "initializing", "activation cycle: " .. table.concat(self.stack, " -> ") .. " -> " .. id)
   U.check(state.phase ~= "failed", id .. ": previous initialization failed: " .. tostring(state.error))
-  state.reason = state.reason or "explicit"
+  state.trigger, state.reason = trigger(self, id, cause)
   state.phase, self.stack[#self.stack + 1] = "initializing", id
   local frame = self._profile and self._profile:begin("config", id)
   local ok, err = xpcall(function()
     for _, before in ipairs(n.after) do
-      self:activate(before)
+      self:activate(before, { kind = "after", parent = id })
     end
     self:mount(id)
     if n.config then
@@ -175,14 +191,14 @@ function Manager:activate(id)
   return self
 end
 
-function Manager:use(id)
-  self:activate(id)
+function Manager:use(id, cause)
+  self:activate(id, cause)
   local n = self.graph.nodes[id]
   U.check(n.main, id .. ": use() requires a main module")
   return require(n.main)
 end
 
-function Manager:status()
+function Manager:status(opts)
   local out = {}
   for _, id in ipairs(self.graph.order) do
     local n = self.graph.nodes[id]
@@ -197,6 +213,13 @@ function Manager:status()
       root = n.roots,
       state = vim.deepcopy(self.states[id]),
     }
+  end
+  if opts and opts.include_inactive then
+    local ids = vim.tbl_keys(self.graph.inactive)
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+      out[#out + 1] = vim.deepcopy(self.graph.inactive[id])
+    end
   end
   return out
 end
@@ -219,6 +242,9 @@ end
 
 function Manager:explain(id)
   local n = self.graph.nodes[id]
+  if not n and self.graph.inactive[id] then
+    return vim.deepcopy(self.graph.inactive[id])
+  end
   U.check(n, "unknown plugin " .. tostring(id))
   local users = {}
   for _, other in ipairs(self.graph.order) do

@@ -72,7 +72,11 @@ function M.complete(manager, lead, line, cursor)
   elseif words[2] == "clean" or words[2] == "recover" then
     choices = { "--apply" }
   elseif vim.list_contains({ "explain", "install", "update", "restore", "freeze", "plan" }, words[2]) then
-    choices = manager.graph.order
+    choices = vim.list_slice(manager.graph.order)
+    if words[2] == "explain" then
+      vim.list_extend(choices, vim.tbl_keys(manager.graph.inactive))
+      table.sort(choices)
+    end
   else
     choices = {}
   end
