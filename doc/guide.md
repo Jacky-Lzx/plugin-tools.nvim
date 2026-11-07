@@ -278,6 +278,18 @@ transaction journal or backups. Recovery handles process termination; storage
 failure or power loss can still require manual inspection. Use one root/lockfile
 pair per configuration and do not externally edit checkouts during an operation.
 
+## Code organization
+
+- `init.lua` exposes the public API; `manager.lua` owns instance state and activation.
+- `startup.lua` coordinates readiness, automatic installation, runtime mounting
+  and startup activation. `runtime.lua` owns runtimepath ordering and native scripts.
+- `operations.lua` coordinates package actions. `operations/` contains process
+  workers, checkout preparation, package ownership, update diffs and crash recovery.
+- `transaction.lua` owns journaling, checkout publication, rollback and staging cleanup.
+- `ui.lua` owns windows and input. `ui/render.lua` composes the text builder,
+  plugin rows, details and auxiliary views in `ui/`.
+- `bootstrap.lua` remains standalone so a disposable clone can install the manager.
+
 ## Performance and verification
 
 The entry module is small. Git and JSON lockfile handling load for package

@@ -80,7 +80,7 @@ function Runtime:_mark(root)
   end
 end
 
-function Runtime:_check()
+function Runtime:check()
   local missing = {}
   for _, root in ipairs(self.order) do
     root.available = U.directory(root.dir)
@@ -96,38 +96,7 @@ function Runtime:_check()
   return missing
 end
 
-function Runtime:start()
-  -- Check every selected directory before installation or runtimepath changes,
-  -- including cold packages. Ready startup never loads package operations.
-  local missing = self:_check()
-  if #missing > 0 and self.manager.options.auto_install then
-    local ids = {}
-    for _, id in ipairs(self.manager.graph.package_order) do
-      local package = self.manager.graph.packages[id]
-      -- Component paths and external checkouts cannot be repaired by cloning.
-      -- Existing files and dangling symlinks must not be replaced automatically.
-      if package.managed and not vim.uv.fs_lstat(package.dir) then
-        ids[#ids + 1] = id
-      end
-    end
-    if #ids > 0 then
-      local task = self.manager:install({ ids = ids })
-      local result, err
-      repeat
-        result, err = task:wait()
-      until task.done
-      U.check(result, "automatic installation failed: " .. tostring(err))
-      missing = self:_check()
-      if self.manager._profile and self.manager._profile.before_enter then
-        -- Newly created directories can now resolve through filesystem aliases.
-        self.manager._profile:refresh_roots()
-      end
-    end
-  end
-  U.check(
-    self.manager.options.strict == false or #missing == 0,
-    "missing plugin directories: " .. table.concat(missing, ", ") .. "; run install() before starting"
-  )
+function Runtime:mount_startup()
   local existing = {}
   for _, path in ipairs(U.runtime_paths()) do
     existing[path] = true

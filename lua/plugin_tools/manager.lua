@@ -78,7 +78,9 @@ function Manager:start()
   if self.timings.enabled then
     self._profile = require("plugin_tools.profile").new(self)
   end
-  local ok, err = pcall(self._start, self)
+  local ok, err = pcall(function()
+    require("plugin_tools.startup").run(self)
+  end)
   self.timings.start_ms = (vim.uv.hrtime() - self._start_at) / 1e6
   if not ok and not self.started then
     self.timings.mount_ms = self.timings.start_ms
@@ -90,36 +92,6 @@ function Manager:start()
     error(err, 0)
   end
   return self
-end
-
-function Manager:_start()
-  self.runtime = require("plugin_tools.runtime").new(self)
-  self.runtime:start()
-  self.timings.mount_ms = (vim.uv.hrtime() - self._start_at) / 1e6
-  self.started = true
-  for _, id in ipairs(self.graph.activation_order) do
-    if self.graph.nodes[id].start and self.states[id].phase ~= "missing" then
-      local ok, err = pcall(self.activate, self, id, { kind = "startup" })
-      if not ok then
-        self.start_error = err
-        U.fail(err)
-      end
-    end
-  end
-  local ok, err = pcall(self._watch_filetypes, self)
-  if not ok then
-    self.start_error = err
-    U.fail(err)
-  end
-end
-
-function Manager:_watch_filetypes()
-  for _, id in ipairs(self.graph.order) do
-    if #self.graph.nodes[id].ft > 0 then
-      require("plugin_tools.triggers").watch(self)
-      return
-    end
-  end
 end
 
 local function trigger(manager, id, cause)
